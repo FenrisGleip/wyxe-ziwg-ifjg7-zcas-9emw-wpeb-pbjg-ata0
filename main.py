@@ -1,4 +1,15 @@
 import os
+import sys
+
+# 取得したキーをチェック（デバッグ用）
+TAVILY_KEY = os.getenv("TAVILY_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
+
+if not TAVILY_KEY or not GROQ_KEY:
+    print("Error: APIキーが正しく読み込めていません。SettingsのSecretsを確認してください。")
+    sys.exit(1)
+
+import os
 from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime
