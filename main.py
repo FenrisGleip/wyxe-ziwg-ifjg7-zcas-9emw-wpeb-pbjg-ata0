@@ -1,15 +1,4 @@
 import os
-import sys
-
-# 取得したキーをチェック（デバッグ用）
-TAVILY_KEY = os.getenv("TAVILY_API_KEY")
-GROQ_KEY = os.getenv("GROQ_API_KEY")
-
-if not TAVILY_KEY or not GROQ_KEY:
-    print("Error: APIキーが正しく読み込めていません。SettingsのSecretsを確認してください。")
-    sys.exit(1)
-
-import os
 from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime
@@ -38,7 +27,7 @@ def fetch_and_analyze():
         内容: {res['content'][:5000]}
         """
         response = groq.chat.completions.create(
-            model="llama-3.1-70b-versatile",
+            model="llama-3.3-70b-versatile", # 最新のモデル名に変更
             messages=[{"role": "user", "content": prompt}]
         )
         reports_html += f"<article style='border-bottom:1px solid #ccc; padding:20px;'>{response.choices[0].message.content}</article>"
