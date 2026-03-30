@@ -1,41 +1,80 @@
 import os
+import sys
 from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime
 
-# APIキーの設定
+# APIキーの取得とチェック
 TAVILY_KEY = os.getenv("TAVILY_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
+
+if not TAVILY_KEY or not GROQ_KEY:
+    print("Error: APIキーが設定されていません。GitHub Secretsを確認してください。")
+    sys.exit(1)
 
 tavily = TavilyClient(api_key=TAVILY_KEY)
 groq = Groq(api_key=GROQ_KEY)
 
 def fetch_and_analyze():
-    # 1. 検索
-    query = "latest exploit poc redteam writeup 2026 commands"
-    results = tavily.search(query=query, search_depth="advanced", max_results=3)["results"]
+    # 1. 検索クエリの定義（最新のTTPsとEvasionに特化）
+    # 英語で検索するほうが圧倒的に良質な情報が集まるため、英語で検索します
+    queries = [
+        "site:x.com OR site:gist.github.com 'EDR evasion' OR 'unhooking' 2026",
+        "site:x.com OR site:medium.com 'initial access' OR 'phishing' TTPs 2026",
+        "site:github.com 'C2 framework' OR 'RAT' payload delivery 2026",
+        "latest 'process injection' techniques red team writeup 2026"
+    ]
     
+    all_results = []
+    for q in queries:
+        try:
+            search_res = tavily.search(query=q, search_depth="advanced", max_results=2)["results"]
+            all_results.extend(search_res)
+        except Exception as e:
+            print(f"Search Error for query '{q}': {e}")
+    
+    if not all_results:
+        return "<p>本日の新しいインテリジェンスは見つかりませんでした。</p>"
+
     reports_html = ""
-    for res in results:
-        # 2. AIによる解析（HTMLタグを含めて出力させる）
+    for res in all_results:
+        # 2. AIによるプロフェッショナル解析（日本語出力）
         prompt = f"""
-        あなたはRed Team技術者です。以下の情報を解析し、再現手順をHTMLの<div>タグ形式で出力してください。
-        - <h3>にタイトル
-        - <pre><code>に実行コマンド
-        - <p>に解説と注意点
-        ソース: {res['url']}
-        内容: {res['content'][:5000]}
+        あなたはシニア・レッドチーム・テスターです。以下のソース情報を解析し、実務で活用可能なレベルの技術レポートを作成してください。
+        
+        【記述ルール】
+        - 必ず「日本語」で回答してください。
+        - 攻撃手法の名称、ツール名、コマンドなどは英語のままで構いません。
+        
+        【レポート構成】
+        1. タイトル: 攻撃手法の簡潔な名称
+        2. カテゴリ: (MITRE ATT&CK: 初期侵入, 回避, 権限昇格, C2等)
+        3. 技術的背景: どのような仕組みでセキュリティ製品をバイパス、あるいは感染させるのか
+        4. 再現手順 (重要): 使用ツール、準備、実行コマンドの例を `code block` で詳細に記述
+        5. 検知回避/対策への助言: ブルーチーム視点での検知ポイントや、テスターとしての留意点
+        
+        ソースURL: {res['url']}
+        ソース内容: {res['content'][:6000]}
+        
+        出力はHTMLの <article> タグのみで構成してください（Markdownは使わず、直接HTMLタグで記述）。
         """
-        response = groq.chat.completions.create(
-            model="llama-3.3-70b-versatile", # 最新のモデル名に変更
-            messages=[{"role": "user", "content": prompt}]
-        )
-        reports_html += f"<article style='border-bottom:1px solid #ccc; padding:20px;'>{response.choices[0].message.content}</article>"
-    
+        
+        try:
+            response = groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You are a world-class Red Team Lead. You provide highly technical and actionable intelligence."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2 # 創作を抑え、事実に忠実にするための設定
+            )
+            reports_html += f"<article style='background: white; border-radius: 8px; padding: 25px; margin-bottom: 40px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 5px solid #d32f2f;'>{response.choices[0].message.content}</article>"
+        except Exception as e:
+            print(f"AI Analysis Error: {e}")
+
     return reports_html
 
 def save_as_html(content):
-    # 3. 最終的なHTMLファイルを構築
     date_str = datetime.now().strftime("%Y-%m-%d")
     html_template = f"""
     <!DOCTYPE html>
@@ -43,19 +82,29 @@ def save_as_html(content):
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta name="robots" content="noindex">
-        <title>Daily Intel - {date_str}</title>
+        <meta name="robots" content="noindex, nofollow">
+        <title>Red Team Daily Intel - {date_str}</title>
         <style>
-            body {{ font-family: sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; background: #f4f4f4; }}
-            article {{ background: white; margin-bottom: 20px; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-            code {{ background: #eee; padding: 2px 5px; border-radius: 4px; }}
-            pre {{ background: #222; color: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; }}
+            body {{ font-family: 'Helvetica Neue', Arial, sans-serif; line-height: 1.7; max-width: 900px; margin: 0 auto; padding: 40px 20px; background: #eceff1; color: #37474f; }}
+            h1 {{ border-bottom: 3px solid #d32f2f; padding-bottom: 10px; color: #263238; }}
+            article h2 {{ color: #d32f2f; margin-top: 0; }}
+            article h3 {{ color: #455a64; border-left: 4px solid #90a4ae; padding-left: 10px; }}
+            code {{ background: #f0f0f0; padding: 2px 4px; border-radius: 4px; font-weight: bold; }}
+            pre {{ background: #263238; color: #eceff1; padding: 20px; border-radius: 6px; overflow-x: auto; }}
+            .footer {{ text-align: center; margin-top: 50px; font-size: 0.8em; color: #78909c; }}
         </style>
     </head>
     <body>
-        <h1>Red Team Daily Intelligence ({date_str})</h1>
-        <p>※本情報は教育および認可されたテスト目的のみに使用してください。</p>
-        {content}
+        <header>
+            <h1>Red Team Daily Intel ({date_str})</h1>
+            <p>※ 本レポートは認可されたペネトレーションテストおよび研究目的のみに使用してください。</p>
+        </header>
+        <main>
+            {content}
+        </main>
+        <div class="footer">
+            Generated by AI Security Agent | Updated daily at 09:00 JST
+        </div>
     </body>
     </html>
     """
@@ -63,5 +112,7 @@ def save_as_html(content):
         f.write(html_template)
 
 if __name__ == "__main__":
+    print("Fetching and analyzing latest intelligence...")
     report_data = fetch_and_analyze()
     save_as_html(report_data)
+    print("Successfully generated index.html")
