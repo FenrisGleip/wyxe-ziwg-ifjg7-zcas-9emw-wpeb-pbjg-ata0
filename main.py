@@ -11,12 +11,10 @@ tavily = TavilyClient(api_key=TAVILY_KEY)
 groq = Groq(api_key=GROQ_KEY)
 
 def fetch_and_analyze():
-    # 日本時間 9:00 (UTC 0:00) 実行時に前日の記事をターゲットにする
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     queries = [
         f'site:bleepingcomputer.com OR site:thehackernews.com "exploit" OR "PoC" after:{yesterday}',
         f'site:unit42.paloaltonetworks.com OR site:mandiant.com "TTPs" after:{yesterday}',
-        f'site:github.com "redteam" OR "exploit" OR "bypass" after:{yesterday}',
         f'latest "initial access" OR "EDR evasion" writeup 2026 after:{yesterday}'
     ]
     
@@ -27,18 +25,17 @@ def fetch_and_analyze():
             raw_results.extend(res)
         except: pass
 
-    if not raw_results:
-        return ""
+    if not raw_results: return ""
 
     unique_results = {res['url']: res for res in raw_results}.values()
-    reports_html = ""
-    for res in unique_results:
-        prompt = f"""あなたはシニア・レッドチーム・オペレーターです。以下のソースを元に再現マニュアルを作成してください。
+    articles_data = [] # 記事データを構造化して保持
+
+    for i, res in enumerate(unique_results):
+        prompt = f"""あなたはシニア・レッドチーム・リサーチャーです。以下の構成でHTML(articleタグ)を作成してください。
         構成: 1.記事概要 2.攻撃グループ 3.攻撃が刺さる条件 4.攻撃概要 5.攻撃で得られる結果 
         6.攻撃再現手順(環境準備, ツール準備, 攻撃実行) 7.対策 
-        不明な点は「不明」と記載し、コマンドは具体的かつ詳細に。
-        ソース: {res['url']} 内容: {res['content'][:7000]}
-        出力はHTMLの<article>タグのみ、日本語で記述してください。"""
+        ※各項目は <h3> で作成し、コマンドは <pre><code> で記述。
+        ソース: {res['url']} 内容: {res['content'][:7000]}"""
         
         try:
             response = groq.chat.completions.create(
@@ -46,54 +43,95 @@ def fetch_and_analyze():
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0
             )
-            reports_html += f"<article style='background:#111; padding:25px; margin-bottom:40px; border-left:5px solid #d32f2f; border-bottom:1px solid #333;'>{response.choices[0].message.content}<p><small>Source: <a href='{res['url']}' target='_blank' style='color:#03a9f4;'>{res['url']}</a></small></p></article>"
+            # 記事タイトルを抽出（AIが作成した最初の見出しなどを利用）
+            title = f"Intelligence #{i+1}" 
+            content = response.choices[0].message.content
+            articles_data.append({"id": f"art-{i}", "title": title, "content": content, "url": res['url']})
         except: pass
-    return reports_html
+    return articles_data
 
-def update_web_pages(content):
+def update_web_pages(articles):
     date_str = datetime.now().strftime("%Y-%m-%d")
     os.makedirs("archive", exist_ok=True)
     
-    # 1. 個別アーカイブページの作成
-    if content:
+    # サイドバーのリンク作成
+    sidebar_links = "".join([f'<a href="#{a["id"]}">{a["title"]}</a>' for a in articles])
+    # メインコンテンツの作成
+    main_content = "".join([
+        f'<section id="{a["id"]}" class="card"><h2>{a["title"]}</h2>{a["content"]}'
+        f'<p><small>Source: <a href="{a["url"]}" target="_blank">{a["url"]}</a></small></p></section>' 
+        for a in articles
+    ])
+
+    # 1. 個別アーカイブページの作成（モダンUI）
+    if articles:
         daily_template = f"""
-        <html><head><meta charset='UTF-8'><title>RT-Report: {date_str}</title>
-        <style>body{{background:#0c0c0c;color:#cfd8dc;font-family:monospace;padding:30px;line-height:1.6;}} 
-        h1{{color:#ff5252;border-bottom:2px solid #ff5252;}} article h2, article h3{{color:#ff5252;}}
-        pre{{background:#000;color:#00e676;padding:15px;border:1px dashed #00e676;overflow-x:auto;}}
-        a{{color:#03a9f4; text-decoration:none;}}</style></head>
-        <body><h1>INTEL REPORT: {date_str}</h1><p><a href='../index.html'>[ BACK TO PORTAL ]</a></p>{content}</body></html>
+        <!DOCTYPE html>
+        <html lang="ja">
+        <head>
+            <meta charset="UTF-8">
+            <title>RT-Intel | {date_str}</title>
+            <style>
+                :root {{ --bg: #0f111a; --card-bg: #1a1c2e; --text: #e0e6ed; --primary: #ff3e3e; --secondary: #00f2ff; --border: #2d314d; }}
+                body {{ margin: 0; display: flex; font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }}
+                /* Sidebar */
+                nav {{ width: 280px; background: #0a0b14; border-right: 1px solid var(--border); padding: 20px; overflow-y: auto; flex-shrink: 0; }}
+                nav h1 {{ font-size: 1.2rem; color: var(--primary); border-bottom: 2px solid var(--primary); padding-bottom: 10px; }}
+                nav a {{ display: block; padding: 12px; color: #8892b0; text-decoration: none; border-radius: 6px; margin-bottom: 5px; font-size: 0.9rem; transition: 0.2s; }}
+                nav a:hover {{ background: var(--card-bg); color: var(--secondary); }}
+                /* Main Content */
+                main {{ flex-grow: 1; overflow-y: auto; padding: 40px; scroll-behavior: smooth; }}
+                .card {{ background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 30px; margin-bottom: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
+                h2 {{ color: var(--secondary); margin-top: 0; font-size: 1.8rem; border-bottom: 1px solid var(--border); padding-bottom: 15px; }}
+                h3 {{ color: var(--primary); margin-top: 25px; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1px; }}
+                pre {{ background: #000; border-radius: 8px; padding: 20px; border: 1px solid #333; overflow-x: auto; color: #50fa7b; font-family: 'Fira Code', monospace; }}
+                code {{ font-family: inherit; }}
+                a {{ color: var(--secondary); text-decoration: none; }}
+                .back-btn {{ display: inline-block; margin-bottom: 20px; color: var(--primary); font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <nav>
+                <h1>RT-DISPATCH</h1>
+                <p><small>{date_str}</small></p>
+                <a href="../index.html" class="back-btn">← PORTAL HOME</a>
+                <hr style="border: 0; border-top: 1px solid var(--border); margin: 20px 0;">
+                {sidebar_links}
+            </nav>
+            <main>
+                {main_content}
+            </main>
+        </body>
+        </html>
         """
         with open(f"archive/{date_str}.html", "w", encoding="utf-8") as f:
             f.write(daily_template)
 
-    # 2. index.html (ポータル) の生成
-    # archiveフォルダ内のHTMLファイルを日付順にリスト化
-    links = []
+    # 2. index.html (ポータル) はシンプルに維持
     files = sorted([f for f in os.listdir("archive") if f.endswith(".html")], reverse=True)
-    for f in files:
-        display_date = f.replace(".html", "")
-        links.append(f"<li><span style='color:#666;'>[{display_date}]</span> <a href='archive/{f}' style='color:#03a9f4; font-size:1.2em;'>Intelligence Report & Reproduction Guide</a></li>")
+    links = "".join([f'<li><a href="archive/{f}">{f.replace(".html", "")} - Intelligence Report</a></li>' for f in files])
 
     index_template = f"""
     <html><head><meta charset='UTF-8'><title>RT Intelligence Portal</title>
-    <style>body{{background:#0a0a0a;color:#eee;font-family:monospace;padding:50px;}} 
-    h1{{color:#d32f2f; font-size:2.5em; border-bottom:3px solid #d32f2f; padding-bottom:10px;}} 
-    ul{{list-style:none; padding:0;}} li{{margin-bottom:20px; padding:10px; border-bottom:1px solid #222;}}
-    .footer{{margin-top:100px; color:#444; font-size:0.8em; text-align:center;}}</style></head>
+    <style>
+        body {{ background:#0f111a; color:#e0e6ed; font-family:sans-serif; padding:100px; display:flex; justify-content:center; }}
+        .container {{ max-width: 600px; width: 100%; }}
+        h1 {{ color:#ff3e3e; font-size:2.5rem; border-left: 5px solid #ff3e3e; padding-left: 20px; }}
+        ul {{ list-style:none; padding:0; margin-top:50px; }}
+        li {{ background:#1a1c2e; margin-bottom:10px; border-radius:8px; border:1px solid #2d314d; transition: 0.3s; }}
+        li:hover {{ border-color: #00f2ff; transform: translateX(10px); }}
+        a {{ display:block; padding:20px; color:#00f2ff; text-decoration:none; }}
+    </style></head>
     <body>
-        <h1>:: RED TEAM INTELLIGENCE PORTAL ::</h1>
-        <p style='color:#888;'>Logged in: Guest | Automated Monitoring: ACTIVE</p>
-        <div style='margin-top:40px;'>
-            <h3>[ ARCHIVED REPORTS ]</h3>
-            <ul>{"".join(links) if links else "<li>No reports available yet.</li>"}</ul>
+        <div class="container">
+            <h1>RT-INTEL<br>ARCHIVE</h1>
+            <ul>{links}</ul>
         </div>
-        <div class='footer'>--- END OF DATABASE INTERFACE ---</div>
     </body></html>
     """
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(index_template)
 
 if __name__ == "__main__":
-    report_content = fetch_and_analyze()
-    update_web_pages(report_content)
+    articles = fetch_and_analyze()
+    update_web_pages(articles)
