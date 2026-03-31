@@ -16,66 +16,75 @@ groq = Groq(api_key=GROQ_KEY)
 MASTER_DATA = "all_articles.json"
 
 def fetch_and_analyze():
-    target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    # 検索クエリから厳格な日付を外し、最新情報を拾いやすくする
     categories = {
-        "MALWARE": f'"{target_date}" malware technical analysis 2026',
-        "INITIAL": f'"{target_date}" "initial access" exploit POC 2026',
-        "POST_EXP": f'"{target_date}" "Active Directory" attack 2026',
-        "AI_SEC": f'"{target_date}" LLM "Prompt Injection" technique 2026'
+        "MALWARE": "latest malware technical analysis persistence 2026",
+        "INITIAL": "new exploit POC initial access bypass 2026",
+        "POST_EXP": "Active Directory lateral movement attack technique 2026",
+        "AI_SEC": "LLM prompt injection jailbreak vulnerability 2026"
     }
     
     new_articles = []
     for cat_id, q in categories.items():
+        print(f"Searching for {cat_id}...")
         try:
-            search_res = tavily.search(query=q, search_depth="advanced", max_results=2)["results"]
+            # search_depth="advanced" で過去1日(day)を指定
+            search_res = tavily.search(query=q, search_depth="advanced", max_results=3, search_period="day")["results"]
+            
+            if not search_res:
+                print(f"No results for {cat_id}")
+                continue
+
             for item in search_res:
                 if any(x['url'] == item['url'] for x in new_articles): continue
                 
-                # 構造化されたJSON出力を強制するプロンプト
                 prompt = f"""
                 あなたはレッドチームの専門家です。以下のソースを元に【日本語で】技術レポートを作成してください。
                 
-                【重要ルール】
-                1. タイトルと内容を完全に一致させること。無関係な「印刷スプーラー」等の固定タイトルを使用することは厳禁。
-                2. 記事を途中で終わらせず、最後まで完結させること。
-                3. 出力は必ず以下のJSON形式で行うこと（他の説明文は一切不要）。
-                
+                【厳守事項】
+                1. ソースにない情報は絶対に書かないこと（「印刷スプーラー」等の固定ネタは禁止）。
+                2. タイトルは新聞の見出し風に「何が、どうなった」を具体的に書くこと。
+                3. 内容とタイトルを完全に一致させること。
+                4. 必ず以下のJSON形式で出力すること。
+
                 {{
-                  "title": "新聞の見出しのように、動詞を含み5W1Hが明確なタイトル",
-                  "summary": "この記事の核心を3行でまとめた要約",
-                  "report": "## 概要\\n(内容)... ## 攻撃手順\\n(1. 2. 3.)... ## 実行コマンド(OSCP形式)\\n(コード)... ## 検知・回避\\n(詳細)..."
+                  "title": "具体的かつ動的な日本語タイトル",
+                  "summary": "3行の要約",
+                  "report": "## 概要\\n... ## 攻撃手順\\n... ## 実行コマンド(OSCP形式)\\n... ## 検知・回避"
                 }}
 
-                ソース内容: {item['content'][:6000]}
+                ソース: {item['content'][:6000]}
                 """
                 
                 try:
-                    # JSONモードを有効にしてリクエスト
+                    # モデル名は安定している llama-3.3-70b-versatile を推奨
                     response = groq.chat.completions.create(
-                        model="llama-3.1-70b-versatile", # 精度向上のため上位モデルを使用
+                        model="llama-3.3-70b-versatile",
                         messages=[{"role": "user", "content": prompt}],
-                        temperature=0.1, # 創造性を抑え、事実に忠実にする
+                        temperature=0.0, # 遊びをなくしソースに忠実にする
                         response_format={"type": "json_object"}
                     )
                     res_json = json.loads(response.choices[0].message.content)
                     
-                    # 必須項目の存在チェック
-                    if not res_json.get("title") or not res_json.get("report"): continue
+                    if not res_json.get("title") or len(res_json.get("report", "")) < 200:
+                        continue
 
                     new_articles.append({
-                        "date": target_date,
+                        "date": datetime.now().strftime("%Y-%m-%d"),
                         "category": cat_id,
                         "title": res_json["title"],
                         "summary": res_json["summary"],
                         "content": res_json["report"],
                         "url": item['url']
                     })
-                    time.sleep(2)
+                    print(f"Successfully generated: {res_json['title']}")
+                    time.sleep(1)
                 except Exception as e:
-                    print(f"Error processing {cat_id}: {e}")
+                    print(f"Groq Error: {e}")
                     continue
         except Exception as e:
-            print(f"Search Error: {e}")
+            print(f"Tavily Error: {e}")
+            
     return new_articles
 
 def update_db_and_ui(new_entries):
@@ -85,20 +94,19 @@ def update_db_and_ui(new_entries):
             with open(MASTER_DATA, "r", encoding="utf-8") as f: db = json.load(f)
         except: db = []
     
-    # 重複排除
     existing_urls = {a['url'] for a in db}
     for entry in new_entries:
         if entry['url'] not in existing_urls: db.append(entry)
     
-    # 常に最新20件程度に絞るか、全件保持（今回は全件保持）
-    db = sorted(db, key=lambda x: x['date'], reverse=True)
+    db = sorted(db, key=lambda x: x['date'], reverse=True)[:50] # 最大50件に制限して軽量化
+    
     with open(MASTER_DATA, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
     
-    # 安全なBase64化
     db_json = json.dumps(db, ensure_ascii=False)
     db_base64 = base64.b64encode(db_json.encode('utf-8')).decode('utf-8')
 
+    # UI側も表示不備を修正
     html_template = r'''
 <!DOCTYPE html>
 <html lang="ja">
@@ -111,26 +119,26 @@ def update_db_and_ui(new_entries):
         :root { --bg: #0d1117; --card: #161b22; --accent: #f85149; --text: #c9d1d9; --border: #30363d; --green: #7ee787; }
         body { margin:0; font-family: -apple-system, system-ui, sans-serif; background:var(--bg); color:var(--text); line-height: 1.6; }
         header { position:sticky; top:0; background:rgba(13,17,23,0.9); backdrop-filter:blur(10px); border-bottom:1px solid var(--border); padding:15px; z-index:100; }
-        #search-box { width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; font-family:monospace; }
-        main { padding:12px; max-width: 800px; margin: 0 auto; padding-bottom:80px; }
+        #search-box { width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; font-family:monospace; outline:none; }
+        main { padding:12px; max-width: 800px; margin: 0 auto; padding-bottom:100px; }
         .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; cursor:pointer; }
+        .card:active { transform: scale(0.98); }
         .card-meta { font-size:0.75rem; color:var(--accent); font-weight:bold; margin-bottom:8px; display:flex; justify-content:space-between; }
         .card-title { font-weight:bold; font-size:1.15rem; line-height:1.4; color:#fff; margin-bottom:10px; border-left: 4px solid var(--accent); padding-left:12px; }
-        .card-summary { font-size:0.85rem; color:#8b949e; }
-        
-        #detail-view { position:fixed; top:0; left:100%; width:100%; height:100%; background:var(--bg); transition: transform 0.3s ease; z-index:1000; overflow-y:auto; }
+        .card-summary { font-size:0.85rem; color:#8b949e; line-height:1.5; }
+        #detail-view { position:fixed; top:0; left:100%; width:100%; height:100%; background:var(--bg); transition: transform 0.3s cubic-bezier(0,0,0.2,1); z-index:1000; overflow-y:auto; }
         #detail-view.open { transform: translateX(-100%); }
         .detail-header { position:sticky; top:0; background:var(--card); padding:10px; border-bottom:1px solid var(--border); display:flex; align-items:center; }
         .back-btn { font-size:1.8rem; background:none; border:none; color:var(--accent); cursor:pointer; padding:0 20px; }
         .detail-body { padding:20px; font-size: 1rem; max-width: 800px; margin: 0 auto; }
         .detail-body h1, .detail-body h2 { color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:5px; margin-top:30px; }
         .detail-body pre { background:#000; padding:15px; border-radius:10px; border:1px solid var(--border); overflow-x:auto; position:relative; margin: 20px 0; }
-        .detail-body code { color:var(--green); font-family:monospace; }
+        .detail-body code { color:var(--green); font-family:monospace; font-size:0.9rem; }
         .copy-btn { position:absolute; top:8px; right:8px; background:#21262d; border:1px solid var(--border); color:#fff; border-radius:5px; font-size:0.6rem; padding:5px 10px; cursor:pointer; }
     </style>
 </head>
 <body>
-    <header><input type="text" id="search-box" placeholder="grep assets..."></header>
+    <header><input type="text" id="search-box" placeholder="キーワードで検索..."></header>
     <main id="list"></main>
     <div id="detail-view">
         <div class="detail-header"><button class="back-btn" onclick="closeDetail()">←</button><div id="det-head" style="font-weight:bold; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div></div>
