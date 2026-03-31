@@ -1,16 +1,3 @@
-"""
-RED-TACTICAL INTELLIGENCE AGENT v3.1
-=====================================
-v3.1 消費量最適化（品質維持）:
-[COST] search_depth: advanced(2cr) → basic(1cr) でTavilyクレジットを半減
-       月間消費: ~480cr → ~240cr  (無料枠1,000crに対して余裕あり)
-[COST] max_tokens: 4096 → 2000 でGroqトークン消費を約半減
-       日次消費: ~100,000tok → ~50,000tok
-[COST] 検索前にDBの既存URLをチェックし既知URLを除外してからLLM呼び出し
-[COST] 1カテゴリあたりのクエリ数を3→2本に削減（重複しやすい3本目を削除）
-       1回の実行上限: Tavily 16cr / Groq ~50,000tok
-"""
-
 import os
 import json
 import re
