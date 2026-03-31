@@ -84,7 +84,7 @@ Output ONLY valid JSON, no markdown fences, no extra text. Use \\n for newlines 
 Schema: {{"title":"日本語見出し30字以内","summary_points":["要点1","要点2","要点3"],"poc_url":"URL or empty","cvss_score":"数値 or empty","mitre_ids":["T1059.001"],"report":"## 概要\\n...\\n## 技術的メカニズム\\n...\\n## 攻撃手順\\n1. ...\\n## 実行コマンド\\n```bash\\n実際のコマンド+オプション+ターゲット例\\n```\\n## MITRE ATT&CK\\n...\\n## 検知・緩和策\\n..."}}
 
 SOURCE:
-{content[:2500]}"""
+{content[:5000]}"""
 
 # ─────────────────────────────────────────────
 # JSON抽出（deepseek-r1の<think>対応を強化）
@@ -197,7 +197,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
             try:
                 results = tavily.search(
                     query=query,
-                    search_depth="basic",       # advanced(2cr)→basic(1cr) でTavily消費半減
+                    search_depth="advanced",    # basicだと動的サイトの本文が取れない
                     max_results=MAX_RESULTS_PER_QUERY,
                     search_period="week",
                 )["results"]
@@ -211,8 +211,8 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                         continue
                     seen_urls.add(url)
 
-                    # コンテンツ不足
-                    if len(content) < 400:
+                    # advanced検索でもコンテンツが少ない場合はスキップ（動的サイト対策）
+                    if len(content) < 600:
                         print(f"  skip (short content): {url[:60]}")
                         continue
 
