@@ -52,7 +52,7 @@ SEARCH_CATEGORIES = {
 }
 
 # 候補を多めに取得し、LLMの新規性フィルタで厳選する
-MAX_RESULTS_PER_QUERY = 4
+MAX_RESULTS_PER_QUERY = 5  # 候補を多く取り新規性フィルタで厳選
 
 # ─────────────────────────────────────────────
 # プロンプト（レッドチーム再現手順特化）
@@ -118,9 +118,11 @@ If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Neve
 
 [## 概要]
 - 3〜5文で技術的要点を簡潔にまとめる
-- 末尾1〜2文: 必ず「新規性・差異化ポイント」を記載
-  例: "従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である"
-  情報不足の場合は既知手法との差異を推定して [推測] を付与
+- 末尾に必ず以下のフォーマットで新規性を記載（改行して独立した段落にすること）:
+
+  **🆕 新規性・差異化ポイント:** 従来のXXX攻撃との具体的な差異を1〜2文で記述。
+  例: "**🆕 新規性・差異化ポイント:** 従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である。"
+  情報不足の場合は既知手法との差異を推定して末尾に [推測] を付与
 
 [## 脆弱性・脅威の技術的メカニズム]
 - ROOT CAUSEを技術的深度で説明（APIコール名・メモリレイアウト・プロトコルフィールド・コードパス）
@@ -134,6 +136,10 @@ If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Neve
 - ラボ環境要件・ターゲット前提条件・必要権限を含む
 - 情報不足は知識から補完して [推測] を付与
 - "攻撃者がXをする"禁止。"1. リスナーを立てる: ..."形式
+- 記事内で言及されたテクニック（例: COMハイジャック、ステガノグラフィー、特定のCLSIDへの書き込みなど）は
+  その作成・実装方法を再現手順に必ず含めること。
+  "XというテクニックをYに対して使う"という記述があれば、
+  Xの実装コード・設定手順・必要なツールを具体的に書く
 
 [## 実行コマンド・再現コード]
 - コマンドは完全で実行可能。プレースホルダー: IP=192.168.1.10, ドメイン=CORP.LOCAL
@@ -272,9 +278,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
         cat_count = 0
 
         for query in queries:
-            if cat_count >= 1:
-                print(f"  [{cat_id}] 1件取得済み — 残クエリをスキップ")
-                break
+            # 上限なし: 新規性スコア4-5の記事はすべて採用
             try:
                 results = tavily.search(
                     query=query,
@@ -287,8 +291,6 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                 results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
                 for item in results:
-                    if cat_count >= 1:
-                        break  # 1件取れたら次クエリへ
                     url     = item.get("url", "")
                     content = item.get("content", "")
 
@@ -781,6 +783,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
       <button class="cat-btn" data-cat="INITIAL">INIT</button>
       <button class="cat-btn" data-cat="POST_EXP">POST</button>
       <button class="cat-btn" data-cat="AI_SEC">AI</button>
+      <button class="cat-btn" data-cat="UNREAD">UNREAD</button>
+      <button class="cat-btn" data-cat="FLAGGED">⚑ FLAG</button>
     </div>
     <div class="date-list" id="date-list"></div>
     <div class="stats-bar">
@@ -838,6 +842,38 @@ let activeCat  = 'ALL';
 let activeDate = 'all';
 const today = new Date().toISOString().slice(0,10);
 
+/* ── User state (read / flagged / deleted) via window.storage ── */
+let userState = { read: {}, flagged: {}, deleted: {} }; // url -> true
+
+async function loadUserState() {
+  try {
+    const r = await window.storage.get('cipher-user-state');
+    if (r) userState = JSON.parse(r.value);
+  } catch(e) { /* 初回 */ }
+}
+
+async function saveUserState() {
+  try { await window.storage.set('cipher-user-state', JSON.stringify(userState)); } catch(e) {}
+}
+
+function isRead(url)    { return !!userState.read[url] }
+function isFlagged(url) { return !!userState.flagged[url] }
+function isDeleted(url) { return !!userState.deleted[url] }
+
+async function markRead(url)   { userState.read[url] = true; await saveUserState(); }
+async function toggleFlag(url) {
+  if (userState.flagged[url]) delete userState.flagged[url];
+  else userState.flagged[url] = true;
+  await saveUserState();
+}
+async function deleteArticle(url) {
+  userState.deleted[url] = true;
+  await saveUserState();
+}
+
+function unreadCount() { return db.filter(a => !isRead(a.url) && !isDeleted(a.url)).length; }
+function flaggedCount(){ return db.filter(a => isFlagged(a.url) && !isDeleted(a.url)).length; }
+
 /* ── search sync (desktop + mobile share same state) ── */
 const deskSearch = document.getElementById('search-box-desk');
 const mobSearch  = document.getElementById('search-box');
@@ -854,7 +890,8 @@ function cvssClass(s){
 function isPocValid(u){return u&&u.startsWith('http')}
 
 /* ── init ── */
-function init(){
+async function init(){
+  await loadUserState();
   document.getElementById('total-count').textContent = db.length;
   document.getElementById('today-count').textContent = db.filter(a=>a.date===today).length;
   document.getElementById('poc-count').textContent   = db.filter(a=>isPocValid(a.poc_url)).length;
@@ -939,7 +976,16 @@ function render(){
   const q=getQuery();
   const feed=document.getElementById('feed');
   feed.innerHTML='';
+  // 未読バッジ数を更新
+  const unreadEl = document.querySelector('.cat-btn[data-cat="UNREAD"]');
+  if(unreadEl){ const n=unreadCount(); unreadEl.textContent = n > 0 ? `UNREAD ${n}` : 'UNREAD'; }
+  const flagEl = document.querySelector('.cat-btn[data-cat="FLAGGED"]');
+  if(flagEl){ const n=flaggedCount(); flagEl.textContent = n > 0 ? `⚑ ${n}` : '⚑ FLAG'; }
+
   const filtered=db.filter(a=>{
+    if(isDeleted(a.url)) return false;
+    if(activeCat==='UNREAD')  return !isRead(a.url);
+    if(activeCat==='FLAGGED') return isFlagged(a.url);
     const mc=activeCat==='ALL'||a.category===activeCat;
     const md=activeDate==='all'||a.date===activeDate;
     const mq=!q||(a.title+(a.summary_points||[]).join(' ')+a.content).toLowerCase().includes(q);
@@ -972,6 +1018,31 @@ function render(){
         ${sumHtml}
         ${(mitreHtml||pocHtml)?`<div class="card-footer">${mitreHtml}${pocHtml}</div>`:''}
         <a href="${a.url}" target="_blank" class="card-source-link" title="${a.url}">📎 ${sourceHost}</a>`;
+      // 未読スタイル
+      if(!isRead(a.url)) card.classList.add('unread');
+      if(isFlagged(a.url)) card.classList.add('flagged');
+
+      // アクションボタン行
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      actions.innerHTML = `
+        <button class="act-btn flag-btn ${isFlagged(a.url)?'flagged':''}" title="フラグ">
+          ${isFlagged(a.url)?'⚑ フラグ済':'⚐ フラグ'}
+        </button>
+        <button class="act-btn delete-btn" title="削除">🗑 削除</button>
+      `;
+      actions.querySelector('.flag-btn').onclick = async e => {
+        e.stopPropagation();
+        await toggleFlag(a.url);
+        render();
+      };
+      actions.querySelector('.delete-btn').onclick = async e => {
+        e.stopPropagation();
+        if(confirm(`「${a.title.slice(0,30)}...」を削除しますか？`)){
+          await deleteArticle(a.url); render();
+        }
+      };
+      card.appendChild(actions);
       card.onclick=()=>openDetail(a);
       // ソースリンクはカード全体のクリックイベントを止める
       card.querySelector('.card-source-link').onclick=e=>e.stopPropagation();
@@ -981,12 +1052,17 @@ function render(){
   feed.appendChild(frag);
 }
 
-function openDetail(a){
+async function openDetail(a){
+  // 既読マーク
+  await markRead(a.url);
+
   const body=document.getElementById('det-body');
   let metaHtml='';
   if(a.cvss_score) metaHtml+=`<span class="cvss-badge ${cvssClass(a.cvss_score)}" style="font-size:.68rem;padding:4px 10px">CVSS ${a.cvss_score}</span>`;
   (a.mitre_ids||[]).forEach(id=>{metaHtml+=`<span class="mitre-chip">${id}</span>`;});
   if(isPocValid(a.poc_url)) metaHtml+=`<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoC / Exploit Repository</a>`;
+
+  const flagLabel = isFlagged(a.url) ? '⚑ フラグ解除' : '⚐ フラグ';
   body.innerHTML=`
     <div class="det-title">${a.title}</div>
     <div class="det-meta-row">
@@ -994,7 +1070,15 @@ function openDetail(a){
       <span style="font-family:var(--mono);font-size:.62rem;color:var(--muted)">${a.date}</span>
       ${metaHtml}
     </div>
-    ${marked.parse(a.content)}`;
+    <div class="det-action-bar">
+      <button class="det-act-btn ${isFlagged(a.url)?'flagged':''}" id="det-flag-btn">${flagLabel}</button>
+      <button class="det-act-btn delete-btn" id="det-delete-btn">🗑 削除</button>
+    </div>
+    ${marked.parse(a.content)}
+    <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bdr)">
+      <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.1em">// SOURCE ARTICLE</span><br>
+      <a href="${a.url}" target="_blank" style="font-family:var(--mono);font-size:.75rem;color:var(--acc2);word-break:break-all;text-decoration:none;">${a.url}</a>
+    </div>`;
   body.querySelectorAll('pre').forEach(pre=>{
     const btn=document.createElement('button');
     btn.className='copy-btn';btn.textContent='COPY';
@@ -1007,10 +1091,23 @@ function openDetail(a){
   });
   document.getElementById('det-cat-tag').innerHTML=`<span class="cat-tag" data-cat="${a.category}" style="font-size:.66rem;padding:3px 10px">${a.category}</span>`;
   document.getElementById('det-source-url').href=a.url;
+
+  document.getElementById('det-flag-btn').onclick = async () => {
+    await toggleFlag(a.url);
+    const fb = document.getElementById('det-flag-btn');
+    if(fb){ fb.textContent = isFlagged(a.url)?'⚑ フラグ解除':'⚐ フラグ'; fb.classList.toggle('flagged', isFlagged(a.url)); }
+    render();
+  };
+  document.getElementById('det-delete-btn').onclick = async () => {
+    if(confirm(`「${a.title.slice(0,30)}...」を削除しますか？`)){
+      await deleteArticle(a.url); closeDetail(); render();
+    }
+  };
+
   document.getElementById('detail').classList.add('open');
   history.pushState({view:'detail'},'');
 }
-function closeDetail(){document.getElementById('detail').classList.remove('open');}
+function closeDetail(){document.getElementById('detail').classList.remove('open'); render();}
 window.onpopstate=()=>closeDetail();
 
 /* ── mobile tab / drawer ── */
