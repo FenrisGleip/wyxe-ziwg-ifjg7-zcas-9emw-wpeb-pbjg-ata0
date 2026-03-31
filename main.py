@@ -35,8 +35,10 @@ MIN_REPORT_LEN   = 300    # 品質フィルタ（max_tokens削減に合わせて
 MAX_RETRIES      = 3
 SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
-PRIMARY_MODEL  = "deepseek-r1-distill-llama-70b"
-FALLBACK_MODEL = "llama-3.3-70b-versatile"
+# deepseek-r1-distill-llama-70b は2025年9月に廃止済み
+# llama-4-scout: TPD 500,000 (llama-3.3-70b-versatileの5倍) で余裕あり
+PRIMARY_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
+FALLBACK_MODEL = "llama-3.1-8b-instant"   # TPD 500,000、速度重視
 
 # ─────────────────────────────────────────────
 # 検索クエリ（セキュリティ研究ソースに誘導）
@@ -75,43 +77,14 @@ CATEGORY_FOCUS = {
 
 def build_prompt(content: str, category: str) -> str:
     focus = CATEGORY_FOCUS.get(category, "攻撃手法を詳述")
-    return f"""You are an elite red team operator writing an internal technical intelligence report.
-Your audience: red teamers who will actually use this to reproduce attacks. They need zero fluff.
-Focus: {focus}
+    return f"""Red team operator report. Focus: {focus}
+Transform source (may be defender-perspective) into attacker-perspective report. Label inferred details [推測].
+Output ONLY valid JSON, no markdown fences, no extra text. Use \\n for newlines in strings.
 
-SOURCE ARTICLE:
-{content[:9000]}
+Schema: {{"title":"日本語見出し30字以内","summary_points":["要点1","要点2","要点3"],"poc_url":"URL or empty","cvss_score":"数値 or empty","mitre_ids":["T1059.001"],"report":"## 概要\\n...\\n## 技術的メカニズム\\n...\\n## 攻撃手順\\n1. ...\\n## 実行コマンド\\n```bash\\n実際のコマンド+オプション+ターゲット例\\n```\\n## MITRE ATT&CK\\n...\\n## 検知・緩和策\\n..."}}
 
-TASK:
-Transform the above source (which may be written from a DEFENDER's perspective) into a RED TEAM OPERATOR'S technical report.
-If the source is vague, infer the most likely technical mechanism from your knowledge and clearly label it "[推測]".
-
-STRICT OUTPUT RULES:
-1. Output ONLY a single valid JSON object. Absolutely NO text outside the JSON.
-2. NO markdown fences (``` or ```json) wrapping the JSON.
-3. All string values use \\n for newlines.
-4. report field: full markdown, Japanese, with these exact sections:
-   ## 概要
-   ## 脆弱性・脅威の技術的メカニズム  ← root causeを詳述
-   ## 攻撃シナリオ（ステップバイステップ）  ← 番号付きリスト、具体的アクション
-   ## 実行コマンド  ← 実際のツール+フルオプション+ターゲット例。必ず ```bash コードブロック
-   ## MITRE ATT&CK マッピング
-   ## 検知シグネチャ・緩和策  ← Sigmaまたはyara snippetを含む
-
-COMMAND EXAMPLES MUST BE CONCRETE. BAD: "impacket-secretsdump を使う". GOOD:
-```bash
-impacket-secretsdump -just-dc-ntlm DOMAIN/user:password@192.168.1.10 -outputfile hashes.txt
-```
-
-JSON SCHEMA (output exactly this structure):
-{{
-  "title": "客観的な日本語ニュース見出し（30字以内）",
-  "summary_points": ["技術的要点1", "技術的要点2", "技術的要点3"],
-  "poc_url": "GitHubやExploit-DBのURL、なければ空文字列のみ",
-  "cvss_score": "数値のみ（例: 9.8）、なければ空文字列のみ",
-  "mitre_ids": ["T1059.001"],
-  "report": "## 概要\\n..."
-}}"""
+SOURCE:
+{content[:2500]}"""
 
 # ─────────────────────────────────────────────
 # JSON抽出（deepseek-r1の<think>対応を強化）
