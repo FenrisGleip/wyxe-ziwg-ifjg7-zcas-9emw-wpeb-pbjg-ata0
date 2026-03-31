@@ -44,6 +44,7 @@ def fetch_and_analyze():
                 """
                 
                 try:
+                    # レートリミットに強い 8b モデルを使用
                     response = groq.chat.completions.create(
                         model="llama-3.1-8b-instant",
                         messages=[{"role": "user", "content": prompt}],
@@ -89,26 +90,23 @@ def update_db_and_ui(new_entries):
     
     json_payload = json.dumps(db)
 
-    # HTML生成 (波括弧を二重にしてエスケープ)
-    html_content = f"""
-    <!DOCTYPE html>
-    <html lang="ja">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>RT-TACTICAL | DATABASE</title>
-        <style>
-            :root {{ --bg: #05070a; --card: #0d1117; --accent: #f85149; --text: #c9d1d9; --border: #30363d; --green: #7ee787; }}
-            body {{ margin:0; font-family:'Consolas', monospace; background:var(--bg); color:var(--text); overflow-x:hidden; }}
-            header {{ position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); padding:15px; z-index:100; }}
-            #search-box {{ width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; }}
-            main {{ padding:15px; padding-bottom:80px; }}
-            .article-card {{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; cursor:pointer; }}
-            .meta {{ font-size:0.7rem; color:#8b949e; margin-bottom:8px; display:flex; justify-content:space-between; }}
-            .attack-id {{ color:var(--accent); font-weight:bold; }}
-            #detail-view {{ position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: 0.3s; z-index:1000; overflow-y:auto; }}
-            #detail-view.open {{ right: 0; }}
-            .detail-header {{ position:sticky; top:0; background:var(--card); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; }}
-            .back-btn {{ font-size:1.5rem; background:none; border:none; color:var(--accent); cursor:pointer; margin-right:15px; }}
-            .detail-content {{ padding:20px; white-space: pre-wrap; }}
-            h3 {{ font-size:0.9rem; color:var(--
+    # 構文エラーを避けるため f-string を使わずに定義
+    template = """
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RT-TACTICAL | DATABASE</title>
+    <style>
+        :root { --bg: #05070a; --card: #0d1117; --accent: #f85149; --text: #c9d1d9; --border: #30363d; --green: #7ee787; }
+        body { margin:0; font-family:'Consolas', monospace; background:var(--bg); color:var(--text); overflow-x:hidden; }
+        header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); padding:15px; z-index:100; }
+        #search-box { width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; }
+        main { padding:15px; padding-bottom:80px; }
+        .article-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; cursor:pointer; }
+        .meta { font-size:0.7rem; color:#8b949e; margin-bottom:8px; display:flex; justify-content:space-between; }
+        .attack-id { color:var(--accent); font-weight:bold; }
+        #detail-view { position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: 0.3s; z-index:1000; overflow-y:auto; }
+        #detail-view.open { right: 0; }
+        .detail-header { position:sticky; top:0; background:var(--card); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:
