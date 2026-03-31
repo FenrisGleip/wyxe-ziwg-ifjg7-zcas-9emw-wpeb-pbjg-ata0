@@ -50,7 +50,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background:linear-gradient(90deg,var(--acc),transparent)}
 .logo-name{
   font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
-  color:var(--acc);text-shadow:0 0 24px rgba(56,191,255,.35);line-height:1;
+  color:var(--acc);line-height:1;
 }
 .logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
 .logo-log-link{
@@ -84,7 +84,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .cat-btn.active[data-cat="POST_EXP"]{background:rgba(176,106,255,.1);border-color:var(--POST_EXP);color:var(--POST_EXP)}
 .cat-btn.active[data-cat="AI_SEC"]{background:rgba(56,191,255,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
 
-.date-list{flex:1;overflow-y:auto;padding:8px}
+.date-list{flex:1;overflow-y:auto;padding:8px;overscroll-behavior:contain}
 .date-item{
   padding:7px 10px;border-radius:3px;cursor:pointer;
   font-family:var(--mono);font-size:.7rem;color:var(--muted);
@@ -107,10 +107,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 
 .stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
 .stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 8px rgba(56,191,255,.3)}
+  }
 
 /* ── Main feed ── */
-.main-feed{flex:1;overflow-y:auto;padding:16px}
+.main-feed{flex:1;overflow-y:auto;padding:16px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .feed{max-width:860px;margin:0 auto}
 .day-label{
   font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);
@@ -122,9 +122,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 /* ── Card ── */
 .card{
   background:var(--surf);border:1px solid var(--bdr);border-radius:4px;
-  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .18s,border-color .18s,transform .18s;
+  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .15s,border-color .15s;
   position:relative;overflow:hidden;
-  will-change:transform;contain:layout style;
+  contain:content;
 }
 .card-source-link{
   display:inline-block;margin-top:8px;
@@ -138,8 +138,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
 .card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
 .card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
-.card:hover{background:var(--surf2);border-color:var(--bdr2);transform:translateX(3px)}
-.card:active{transform:translateX(1px)}
+.card:hover{background:var(--surf2);border-color:var(--bdr2)}
+.card:active{opacity:.85}
 
 .card-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .cat-tag{
@@ -178,6 +178,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background:rgba(56,191,255,.07);color:var(--acc);
   border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
   animation:blink 2s infinite;
+  will-change:opacity;
 }
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
 .no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.1em}
@@ -218,7 +219,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   padding:8px 16px;border-radius:3px;text-decoration:none;
   font-family:var(--mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
 }
-.poc-btn:hover{background:rgba(56,191,255,.15);box-shadow:0 0 14px rgba(56,191,255,.15)}
+.poc-btn:hover{background:rgba(56,191,255,.15)}
 
 /* markdown */
 .det-inner h1{display:none}
@@ -269,7 +270,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
     background:linear-gradient(90deg,var(--acc),transparent 60%)}
   .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
-    color:var(--acc);letter-spacing:.1em;text-shadow:0 0 16px rgba(56,191,255,.3)}
+    color:var(--acc);letter-spacing:.1em;}
   .mob-search-btn{background:none;border:1px solid var(--bdr2);color:var(--text);
     padding:5px 10px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.65rem}
 
@@ -297,7 +298,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   }
   .tab-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5}
   .tab-btn.active{color:var(--acc);border-top-color:var(--acc)}
-  .tab-btn.active svg{filter:drop-shadow(0 0 4px var(--acc))}
+  .tab-btn.active svg{opacity:1}
 
   /* mobile date drawer */
   .mob-drawer{
@@ -410,7 +411,7 @@ const today = new Date().toISOString().slice(0,10);
 const deskSearch = document.getElementById('search-box-desk');
 const mobSearch  = document.getElementById('search-box');
 if(deskSearch) deskSearch.oninput = e => { if(mobSearch) mobSearch.value = e.target.value; render(); };
-if(mobSearch)  mobSearch.oninput  = e => { if(deskSearch) deskSearch.value = e.target.value; render(); };
+if(mobSearch)  mobSearch.oninput  = e => { if(deskSearch) deskSearch.value = e.target.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
 
 function getQuery(){ return (deskSearch||mobSearch)?.value.toLowerCase() || ''; }
 
@@ -516,11 +517,12 @@ function render(){
   if(!filtered.length){feed.innerHTML='<div class="no-data">// NO INTELLIGENCE FOUND //</div>';return;}
   const groups={};
   filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a);});
+  const frag=document.createDocumentFragment();
   Object.keys(groups).sort().reverse().forEach(date=>{
     const lbl=document.createElement('div');
     lbl.className='day-label';
     lbl.innerHTML=date+(date===today?' &nbsp;<span style="color:var(--acc);font-size:.55rem">TODAY</span>':'');
-    feed.appendChild(lbl);
+    frag.appendChild(lbl);
     groups[date].forEach(a=>{
       const card=document.createElement('div');
       card.className='card';card.dataset.cat=a.category;
@@ -542,9 +544,10 @@ function render(){
       card.onclick=()=>openDetail(a);
       // ソースリンクはカード全体のクリックイベントを止める
       card.querySelector('.card-source-link').onclick=e=>e.stopPropagation();
-      feed.appendChild(card);
+      frag.appendChild(card);
     });
   });
+  feed.appendChild(frag);
 }
 
 function openDetail(a){

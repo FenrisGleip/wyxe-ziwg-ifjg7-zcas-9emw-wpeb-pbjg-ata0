@@ -633,5 +633,72 @@
     ],
     "content": "## 概要\nContext poisoning は、AI エージェントに対する最も高度な攻撃ベクトルの一つである。この攻撃は、ツール、エージェント、スキル、およびそれぞれを使用する例を記述した自然言語を悪用する。これらの記述は、AI モデルに送信されるコンテキストに含まれ、モデルの意思決定を毒する。本手法の新規性は、従来の攻撃が API を直接狙うのに対し、ツール記述を介して間接的に AI モデルを攻撃できる点である。また、既知のEDR製品がフックするAPIを一切使用しない点が新しい。\n\n## 脆弱性・脅威の技術的メカニズム\nContext poisoning は、ツール記述を操作して AI モデルの動作を悪意のあるものにする。この操作は、ツール記述に含まれるプロンプト命令を介して行われる。具体的には、ツール記述に悪意のある命令を埋め込み、AI モデルがその命令に従うようにする。AI モデルは、コンテキストに基づいて意思決定を行うため、ツール記述の操作によってモデルの動作を制御できる。\n\n## 再現手順（レッドチームテスター向け）\n1. 攻撃対象の AI モデルをセットアップする。\n2. ツール記述を操作して悪意のある命令を埋め込む。\n3. 操作したツール記述を AI モデルに送信する。\n4. AI モデルの動作を確認する。\n\n## 実行コマンド\n```bash\n# 操作したツール記述を AI モデルに送信する例\ncurl -X POST -H \"Content-Type: application/json\" -d '{\"tool_description\": \"悪意のある命令\"}' http://ai-model.com/api/tool\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```\n# Sigma 検知ルール例\ntitle: Context Poisoning Attack\nstatus: experimental\nlogsource:\n    product: ai-model\ntype: detection\ndefinition:\n    - search_in_field:\n        field: tool_description\n        query: '悪意のある命令'\n```\n",
     "url": "https://www.solo.io/blog/deep-dive-mcp-and-a2a-attack-vectors-for-ai-agents"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "Matanbuchus 3.0 Loader and AstarionRAT Malware Campaign",
+    "summary_points": [
+      "Matanbuchus 3.0 loader delivers AstarionRAT via ClickFix social engineering",
+      "AstarionRAT enables credential theft, SOCKS5 proxying, and reflective payload loading",
+      "C2 communications protected by RSA encryption"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nA sophisticated ClickFix social engineering campaign, first observed in February 2026, targets Windows users worldwide. The campaign tricks victims into executing a silent MSI installation that delivers Matanbuchus 3.0, a premium Malware-as-a-Service (MaaS) loader. Once deployed, Matanbuchus 3.0 installs AstarionRAT, a newly identified remote access trojan (RAT). The RAT is capable of credential theft, SOCKS5 proxying, network port scanning, and reflective payload loading. All command-and-control (C2) communications between AstarionRAT and its operators are protected through RSA encryption. This campaign is a significant and highly evasive threat to enterprise environments globally. The novelty of this campaign lies in its use of a premium MaaS loader and a newly identified RAT, making it a distinct threat compared to existing campaigns.\n\n## 脆弱性・脅威の技術的メカニズム\nThe Matanbuchus 3.0 loader uses a multi-stage infection process. Initially, the victim is tricked into executing an MSI installation, which silently installs the loader. The loader then decrypts and maps the AstarionRAT payload into memory. The exact API calls used in this process include VirtualAlloc, WriteProcessMemory, and CreateRemoteThread. The AstarionRAT payload is obfuscated using a custom algorithm, likely involving XOR or RC4, with the key material stored in a hardcoded buffer within the loader.\n\nThe C2 protocol used by AstarionRAT involves HTTP communications with a beaconing interval of approximately 5 minutes and a jitter of 30 seconds. The communications are encoded using base64. The URI patterns used for C2 communications include '/update' and '/data', with the domain name resolved through a DNS request.\n\n## 再現手順（レッドチームテスター向け）\n1. Set up a lab environment with a Windows 10 or later target machine and a command-and-control (C2) server.\n2. Create a malicious MSI installation package that delivers the Matanbuchus 3.0 loader.\n3. Use social engineering tactics to trick the victim into executing the MSI installation.\n4. Configure the C2 server to receive and process communications from AstarionRAT.\n5. Verify that AstarionRAT is installed and communicating with the C2 server.\n\n## 実行コマンド・再現コード\n```bash\n# Create a malicious MSI installation package\nmsidb -d Matanbuchus3.0.msi -g\n# Extract the payload and create a new MSI package\nmsidb -n new_msi.msi\n# Configure the C2 server to receive communications\nnc -l -p 80 > incoming_data.txt\n```\n\n## MITRE ATT&CK マッピング\nThe Matanbuchus 3.0 loader and AstarionRAT campaign can be mapped to the following MITRE ATT&CK sub-techniques:\n- T1055.012: Process Hollowing\n- T1204.001: User Data\n- T1071.001: Web Service\n\n## 検知シグネチャ・緩和策\nTo detect this campaign, consider implementing the following Sigma rule:\n```yml\ntitle: Detect Matanbuchus 3.0 Loader and AstarionRAT\nstatus: experimental\nlogsource:\n  product: windows\n  category: process_creation\nrule:\n  - rule:>\n      Image|endswith: \\Windows\\System32\\msiexec.exe\n      CommandLine|contains: Matanbuchus3.0\n```\nAdditional mitigations include implementing robust social engineering defenses, restricting MSI installations, and monitoring for suspicious C2 communications.",
+    "url": "https://hivepro.com/threat-advisory/lickfix-to-control-matanbuchus-campaign-deploys-astarionrat-in-minutes/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "CVE-2026-24061 telnetd 認証バイパス脆弱性",
+    "summary_points": [
+      "telnetd に存在する深刻な認証バイパス脆弱性",
+      "リモートコード実行（RCE）につながる可能性があります"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nCVE-2026-24061 は、telnetd に存在する深刻な認証バイパス脆弱性であり、リモートコード実行（RCE）につながる可能性があります。この脆弱性は、2015 年以降にリリースされた telnetd バージョンに影響を与えます。攻撃者は、特別に細工されたリクエストを送信することで、認証をバイパスし、システムへのアクセスを取得できます。本手法の新規性・差異化ポイントは、従来の攻撃手法では、telnetd の脆弱性を悪用するには、事前に認証が必要であったが、本手法は認証をバイパスして RCE を実現可能である点である。\n\n## 脆弱性・脅威の技術的メカニズム\nCVE-2026-24061 は、telnetd の LINEMODE 機能に存在するバッファオーバーフローの脆弱性です。攻撃者は、特別に細工されたリクエストを送信することで、スタックを上書きし、任意のコードを実行できます。この脆弱性は、telnetd がユーザーの入力を適切に処理しないことが原因で発生します。具体的には、telnetd は、ユーザーが送信したデータの長さをチェックせずに、データをスタックにコピーします。これにより、攻撃者はスタックを上書きし、任意のコードを実行できます。\n\n## 再現手順（レッドチームテスター向け）\n1. 脆弱な telnetd がインストールされたシステムをセットアップします。\n2. 攻撃者が細工されたリクエストを送信できるように、telnet サービスを有効にします。\n3. 攻撃者は、特別に細工されたリクエストを送信して、認証をバイパスします。\n4. 攻撃者は、システムへのアクセスを取得し、任意のコードを実行します。\n\n## 実行コマンド・再現コード\n```bash\ntelnet -v <target_ip> 23\nTrying <target_ip>...\nConnected to <target_ip>.\nEscape character is '^]'.\n<細工されたリクエスト>\n```\n具体的には、以下のような Python コードを使用して、細工されたリクエストを送信できます。\n```python\nimport socket\n\ntarget_ip = '192.168.1.10'\ntarget_port = 23\n\nsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\nsock.connect((target_ip, target_port))\n\n# 細工されたリクエストを送信\npayload = 'A' * 1024\nsock.sendall(payload.encode())\n\nsock.close()\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect CVE-2026-24061 telnetd Authentication Bypass\ndescription: Detect attempts to exploit CVE-2026-24061 telnetd authentication bypass\nlogsource:\n  - product: network\n  - category: network_traffic\ndetection:\n  - protocol: telnet\n  - src_ip: $attacker_ip\n  - dst_ip: $target_ip\n  - dst_port: 23\n  - packet_length: > 1024\n  - http_method: not GET\n  - http_user_agent: not \"-\"\n```\n",
+    "url": "https://github.com/0xMarcio/cve"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "CVE-2026-20805 and CVE-2026-20876 Exploit",
+    "summary_points": [
+      "ASLR bypass",
+      "VBS buffer overflow",
+      "privilege escalation"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nThis report details the exploitation of two vulnerabilities, CVE-2026-20805 and CVE-2026-20876, which can be chained to achieve reliable privilege escalation and remote code execution. The exploitation process involves bypassing memory protections such as ASLR and DEP.\n\n## 脆弱性・脅威の技術的メカニズム\nThe attack begins with the crafting of a malicious ALPC (Advanced Local Procedure Call) message to the Desktop Window Manager (DWM). The message requests a data operation on the DWM port object. The DWM process retrieves the port section address, which is typically fixed at boot but randomized by ASLR. The response message contains the leaked address, which the attacker uses to calculate the actual memory layout. This allows the attacker to defeat ASLR and enable precise exploit targeting.\n\nThe exploit chain scenario involves the following steps:\n1. Gain initial foothold through phishing, malware, etc.\n2. Use CVE-2026-20805 to leak the DWM address, bypassing ASLR.\n3. Identify the gadget chain address in kernel32.dll at a specific offset.\n4. Craft a ROP (Return-Oriented Programming) chain using known addresses.\n5. Use CVE-2026-20876, a buffer overflow in the VBS Enclave, to overwrite the return address.\n6. Execute the ROP chain, leading to system code execution.\n7. Achieve privilege escalation to SYSTEM.\n8. Install a persistent backdoor.\n\n## 再現手順（レッドチームテスター向け）\n1. Establish an initial foothold on the target system through phishing or malware.\n2. Use a tool like `alpc` to craft and send a malicious ALPC message to the DWM, requesting a data operation on the DWM port object.\n3. Analyze the response message to leak the DWM address.\n4. Calculate the actual memory layout based on the leaked address.\n5. Identify the gadget chain address in kernel32.dll.\n6. Craft a ROP chain using known addresses.\n7. Use a tool like `vbs` to trigger the buffer overflow in the VBS Enclave.\n8. Execute the ROP chain to achieve system code execution.\n9. Escalate privileges to SYSTEM.\n10. Install a persistent backdoor.\n\n## 実行コマンド・再現コード\n```bash\n# Craft and send malicious ALPC message\nalpc --message-type 0x100 --port-name \\win32u\\DWM --data-size 0x1000\n\n# Analyze response message\n# ...\n\n# Craft ROP chain\n# ...\n\n# Trigger buffer overflow in VBS Enclave\nvbs --enclave --buffer-overflow --rop-chain\n```\n\n## MITRE ATT&CK マッピング\nT1055.012: Exploitation of a Software Vulnerability\n\n## 検知シグネチャ・緩和策\n```yml\ntitle: Detecting Abnormal ALPC Activity\nid: 1234567890\nstatus: experimental\n\ninputs:\n  - arg1: EventID\n    description: Sysmon Event ID\n    type: integer\n    default: 18\n\nrule:\n  - EventID: $arg1\n    - MessageType: 0x100\n    - PortName: '\\win32u\\DWM'\n\ncondition:\n  - $arg1 == 18 and $MessageType == 0x100 and $PortName == '\\win32u\\DWM'\n```\n\nThe mitigation strategy includes applying patches for CVE-2026-20805 and CVE-2026-20876, monitoring for abnormal ALPC activity, and implementing additional security measures such as DEP and CFG.",
+    "url": "https://firecompass.com/weekly-report-new-hacking-techniques-and-critical-cves-27-jan-2-feb-2026/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "AI_SEC",
+    "title": "LLM Jailbreak Techniques",
+    "summary_points": [
+      "LLM jailbreaking techniques",
+      "Control Character Injection",
+      "Markdown Injection"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nLLM jailbreaking refers to attempts to bypass safety measures and ethical constraints built into language models. This report details two common jailbreaking techniques: Control Character Injection and Markdown Injection. The novelty of this report lies in providing concrete payload examples and bypass techniques for safety filters.\n\n## 脆弱性・脅威の技術的メカニズム\nThe root cause of LLM jailbreaking is the vulnerability in the text processing and rendering mechanisms of language models. Attackers can craft prompts that exploit these vulnerabilities, allowing them to bypass safety measures and execute malicious actions.\n\nControl Character Injection exploits the gap between text processing and rendering by inserting special Unicode control characters. This technique alters how text is processed and displayed, potentially allowing attackers to bypass safety filters.\n\nMarkdown Injection uses markdown or HTML formatting to hide or obfuscate content. This technique exploits the model's handling of formatted text and the potential gap between raw text and rendered output.\n\n## 再現手順（レッドチームテスター向け）\n1. Set up a lab environment with a language model and a testing framework.\n2. Prepare a test prompt with a safety filter.\n3. Inject control characters or markdown formatting into the prompt.\n4. Observe the model's response and verify if the safety filter has been bypassed.\n\n## 実行コマンド・再現コード\n```python\ndef control_character_example():\n    text = \"normal\" + \"\\u200D\" + \"text\" # Zero-width joiner\n    text2 = \"normal\" + \"\\u200C\" + \"text\" # Zero-width non-joiner\n    print(f\"With ZWJ: {text.encode('utf-8')}\")\n    print(f\"With ZWNJ: {text2.encode('utf-8')}\")\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect Control Character Injection\nid: 2023-001\nstatus: experimental\nlogsource:\n    - product: language_model\ntype: query\nquery: |\n    SELECT * FROM logs WHERE text LIKE \"%\\u200D%\" OR text LIKE \"%\\u200C%\"\n```\n",
+    "url": "https://www.promptfoo.dev/blog/how-to-jailbreak-llms/"
   }
 ]
