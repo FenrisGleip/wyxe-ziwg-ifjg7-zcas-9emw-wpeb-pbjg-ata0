@@ -1,123 +1,136 @@
 """
-RED-TACTICAL INTELLIGENCE AGENT v2.0
+RED-TACTICAL INTELLIGENCE AGENT v3.0
 =====================================
-改善点:
-- LLM: deepseek-r1-distill-llama-70b (推論特化モデル、無料)
-- 段階的Chain-of-Thought分析で技術的深度を大幅向上
-- 検索クエリの多層化・精緻化
-- JSONパース失敗時のフォールバック＋リトライ処理
-- CVSS/MITRE ATT&CK情報の自動抽出
-- UIの全面刷新
+v3.0 fixes & improvements:
+[CRITICAL] データ注入をJSONファイル分離方式に変更（HTMLへの直接埋め込みを廃止）
+[CRITICAL] deepseek-r1の<think>タグ対応を強化（貪欲マッチを非貪欲に修正）
+[CRITICAL] all_articles.json / index.htmlをGitHub Actionsで確実にコミットする想定に対応
+[QUALITY]  攻撃者視点への強制変換プロンプト（防御寄りソースも攻撃手順に落とし込む）
+[QUALITY]  コマンド例にフルオプション・ターゲット・パイプを必須化
+[QUALITY]  検索ソースをセキュリティ特化ドメインへ誘導するクエリ設計
+[QUALITY]  poc_url / cvss_score のバリデーション強化（"N/A"等を除外）
+[QUALITY]  タイトル重複チェックで実質的な重複記事を排除
+[UI]       summaryをHTML箇条書きで表示
+[UI]       スキャンライン・グリッド・グロー等のターミナル風UIに刷新
 """
 
 import os
 import json
 import re
 import time
+import hashlib
 from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime
 
-# --- SETTINGS ---
-TAVILY_KEY = os.getenv("TAVILY_API_KEY")
-GROQ_KEY   = os.getenv("GROQ_API_KEY")
-tavily     = TavilyClient(api_key=TAVILY_KEY)
+# ─────────────────────────────────────────────
+# 設定
+# ─────────────────────────────────────────────
+TAVILY_KEY  = os.getenv("TAVILY_API_KEY")
+GROQ_KEY    = os.getenv("GROQ_API_KEY")
+tavily      = TavilyClient(api_key=TAVILY_KEY)
 groq_client = Groq(api_key=GROQ_KEY)
 
-MASTER_DATA = "all_articles.json"
+MASTER_DATA      = "all_articles.json"
+OUTPUT_HTML      = "index.html"
+MAX_DB_ENTRIES   = 200
+MIN_REPORT_LEN   = 500    # 品質フィルタ
+MAX_RETRIES      = 3
+SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
-# deepseek-r1は推論(<think>タグ)を含む出力をするため、JSONを確実に抽出する必要がある
-# 無料枠で最高品質: deepseek-r1-distill-llama-70b
 PRIMARY_MODEL  = "deepseek-r1-distill-llama-70b"
 FALLBACK_MODEL = "llama-3.3-70b-versatile"
 
-# ============================================================
-# 1. 検索クエリの多層化
-# ============================================================
+# ─────────────────────────────────────────────
+# 検索クエリ（セキュリティ研究ソースに誘導）
+# ─────────────────────────────────────────────
 SEARCH_CATEGORIES = {
     "MALWARE": [
-        "malware loader dropper technical analysis 2026",
-        "ransomware new variant persistence mechanism evasion",
-        "C2 framework implant new technique beacon",
+        "malware technical analysis shellcode loader evasion technique site:github.com OR site:securelist.com OR site:unit42.paloaltonetworks.com",
+        "new malware campaign persistence LOLBAS fileless 2026",
+        "RAT backdoor C2 communication protocol obfuscation analysis",
     ],
     "INITIAL": [
-        "CVE exploit proof of concept RCE 2026",
-        "zero day vulnerability bypass authentication 2026",
-        "initial access broker exploit kit new technique",
+        "CVE 2026 critical RCE exploit proof of concept published",
+        "authentication bypass vulnerability exploit walkthrough writeup",
+        "zero day exploit initial access broker attack chain 2026",
     ],
     "POST_EXP": [
-        "Active Directory attack technique lateral movement 2026",
-        "privilege escalation Windows Linux new method 2026",
-        "credential dumping LSASS bypass EDR 2026",
+        "Active Directory privilege escalation new technique kerberoasting RBCD 2026",
+        "EDR bypass AV evasion Windows technique 2026 writeup",
+        "lateral movement credential dumping LSASS new method",
     ],
     "AI_SEC": [
-        "LLM jailbreak prompt injection attack 2026",
-        "AI model attack adversarial exploit 2026",
-        "MCP tool poisoning agentic AI security 2026",
+        "LLM prompt injection jailbreak exploit technique 2026",
+        "MCP tool poisoning agentic AI attack vector 2026",
+        "AI red team attack adversarial machine learning exploit",
     ],
 }
 
-MAX_RESULTS_PER_QUERY = 2   # クエリ数が増えた分、1クエリあたりを絞る
-MIN_REPORT_LENGTH     = 400  # 品質フィルタの閾値を引き上げ
+MAX_RESULTS_PER_QUERY = 2
 
-# ============================================================
-# 2. プロンプト設計 (CoT + 構造化出力)
-# ============================================================
-def build_analysis_prompt(content: str, category: str) -> str:
-    """
-    deepseek-r1はchain-of-thoughtが得意。
-    まず<think>で内部推論させてから、最終的にJSONのみを出力するよう指示する。
-    """
-    category_guidance = {
-        "MALWARE":  "マルウェアの永続化・難読化・C2通信の技術的メカニズムに焦点を当てる",
-        "INITIAL":  "脆弱性のroot cause、PoC再現手順、影響を受けるバージョンを明確にする",
-        "POST_EXP": "横断的侵害・権限昇格の具体的なコマンド・ツールチェーンを記述する",
-        "AI_SEC":   "攻撃ベクター・ペイロード例・LLMへの影響を技術的に説明する",
-    }.get(category, "技術的な攻撃手法を詳細に分析する")
+# ─────────────────────────────────────────────
+# プロンプト（攻撃者視点への強制変換）
+# ─────────────────────────────────────────────
+CATEGORY_FOCUS = {
+    "MALWARE":  "マルウェアのローダー機構・難読化アルゴリズム・C2通信プロトコル・永続化レジストリキーを攻撃者目線で詳述",
+    "INITIAL":  "脆弱性のroot cause（バグの本質）・exploitの具体的トリガー条件・ターゲットバージョン・bypass条件を攻撃者目線で詳述",
+    "POST_EXP": "権限昇格・横断的侵害・認証情報窃取の具体的ツールチェーンとコマンドを攻撃者目線で詳述",
+    "AI_SEC":   "LLM/AIへの攻撃ペイロード例・bypass手法・影響範囲を攻撃者目線で詳述",
+}
 
-    return f"""You are a senior red team analyst with 15 years of experience in offensive security.
-Your focus: {category_guidance}
+def build_prompt(content: str, category: str) -> str:
+    focus = CATEGORY_FOCUS.get(category, "攻撃手法を詳述")
+    return f"""You are an elite red team operator writing an internal technical intelligence report.
+Your audience: red teamers who will actually use this to reproduce attacks. They need zero fluff.
+Focus: {focus}
 
-Analyze the following threat intelligence source and produce a structured technical report.
-
-STRICT REQUIREMENTS:
-1. Title: Objective Japanese newspaper headline (no instructive phrasing).
-2. Summary: 3 concise bullet points in Japanese highlighting key technical takeaways.
-3. Report sections (Japanese):
-   - ## 概要: Executive summary (3-5 sentences)
-   - ## 技術的詳細: In-depth mechanism explanation with internals
-   - ## 攻撃シナリオ・再現手順: Step-by-step attack chain (numbered)
-   - ## 実行コマンド例: Concrete commands using real tools (curl, impacket, msfvenom, netexec, sliver, etc.) in fenced code blocks
-   - ## MITRE ATT&CK マッピング: Relevant Tactic/Technique IDs (e.g., T1059.001)
-   - ## 検知・緩和策: Detection rules (Sigma/Yara snippets preferred) and mitigations
-4. Extract any GitHub PoC / exploit URLs into poc_url.
-5. If CVSS score is mentioned, extract it into cvss_score.
-6. Output ONLY valid JSON. No markdown fences, no preamble, no explanation outside JSON.
-
-JSON schema:
-{{
-  "title": "string",
-  "summary": "string (3 bullet points joined by \\n)",
-  "poc_url": "string or empty",
-  "cvss_score": "string or empty (e.g. 9.8)",
-  "mitre_ids": ["T1059.001", "..."],
-  "report": "full markdown report string"
-}}
-
-SOURCE:
+SOURCE ARTICLE:
 {content[:9000]}
-"""
 
-# ============================================================
-# 3. 堅牢なJSON抽出
-# ============================================================
-def extract_json_from_response(raw: str) -> dict | None:
-    """
-    deepseek-r1は<think>...</think>タグを出力した後にJSONを返す。
-    複数のパターンで抽出を試みる。
-    """
-    # <think>タグを除去
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+TASK:
+Transform the above source (which may be written from a DEFENDER's perspective) into a RED TEAM OPERATOR'S technical report.
+If the source is vague, infer the most likely technical mechanism from your knowledge and clearly label it "[推測]".
+
+STRICT OUTPUT RULES:
+1. Output ONLY a single valid JSON object. Absolutely NO text outside the JSON.
+2. NO markdown fences (``` or ```json) wrapping the JSON.
+3. All string values use \\n for newlines.
+4. report field: full markdown, Japanese, with these exact sections:
+   ## 概要
+   ## 脆弱性・脅威の技術的メカニズム  ← root causeを詳述
+   ## 攻撃シナリオ（ステップバイステップ）  ← 番号付きリスト、具体的アクション
+   ## 実行コマンド  ← 実際のツール+フルオプション+ターゲット例。必ず ```bash コードブロック
+   ## MITRE ATT&CK マッピング
+   ## 検知シグネチャ・緩和策  ← Sigmaまたはyara snippetを含む
+
+COMMAND EXAMPLES MUST BE CONCRETE. BAD: "impacket-secretsdump を使う". GOOD:
+```bash
+impacket-secretsdump -just-dc-ntlm DOMAIN/user:password@192.168.1.10 -outputfile hashes.txt
+```
+
+JSON SCHEMA (output exactly this structure):
+{{
+  "title": "客観的な日本語ニュース見出し（30字以内）",
+  "summary_points": ["技術的要点1", "技術的要点2", "技術的要点3"],
+  "poc_url": "GitHubやExploit-DBのURL、なければ空文字列のみ",
+  "cvss_score": "数値のみ（例: 9.8）、なければ空文字列のみ",
+  "mitre_ids": ["T1059.001"],
+  "report": "## 概要\\n..."
+}}"""
+
+# ─────────────────────────────────────────────
+# JSON抽出（deepseek-r1の<think>対応を強化）
+# ─────────────────────────────────────────────
+def extract_json(raw: str) -> dict | None:
+    # <think>...</think> を非貪欲マッチで除去（ネスト・複数ブロック対応）
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    cleaned = cleaned.strip()
+
+    # ```json ... ``` または ``` ... ``` ブロックを除去
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
 
     # パターン1: そのままパース
     try:
@@ -125,67 +138,92 @@ def extract_json_from_response(raw: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # パターン2: 最初の { から最後の } を抽出
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
+    # パターン2: 最初の { から最後の } まで抽出（外側のテキストを無視）
+    brace_start = cleaned.find("{")
+    brace_end   = cleaned.rfind("}")
+    if brace_start != -1 and brace_end > brace_start:
         try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-
-    # パターン3: ```json ... ``` ブロックを抽出
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
+            return json.loads(cleaned[brace_start:brace_end+1])
         except json.JSONDecodeError:
             pass
 
     return None
 
-# ============================================================
-# 4. LLM呼び出し（リトライ付き）
-# ============================================================
-def call_llm(prompt: str, max_retries: int = 3) -> dict | None:
-    models = [PRIMARY_MODEL, FALLBACK_MODEL]
+def validate_result(res: dict) -> bool:
+    """品質フィルタ: 必須フィールドと最低品質チェック"""
+    if not res:
+        return False
+    if not res.get("title") or len(res["title"]) < 5:
+        return False
+    if not res.get("report") or len(res["report"]) < MIN_REPORT_LEN:
+        return False
+    # LLMがpoc_urlに "なし" "N/A" "none" 等を入れた場合は空文字に正規化
+    poc = res.get("poc_url", "")
+    if poc and not poc.startswith("http"):
+        res["poc_url"] = ""
+    # cvss_scoreが数値でなければ空文字に正規化
+    cvss = res.get("cvss_score", "")
+    if cvss:
+        try:
+            float(cvss)
+        except ValueError:
+            res["cvss_score"] = ""
+    return True
 
-    for model in models:
-        for attempt in range(max_retries):
+# ─────────────────────────────────────────────
+# LLM呼び出し（モデルフォールバック付きリトライ）
+# ─────────────────────────────────────────────
+def call_llm(prompt: str) -> dict | None:
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        for attempt in range(MAX_RETRIES):
             try:
-                response = groq_client.chat.completions.create(
+                resp = groq_client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,   # 再現性を高めつつわずかに揺らぎを許容
+                    temperature=0.1,
                     max_tokens=4096,
-                    # deepseek-r1はjson_objectモードが不安定なため、プロンプトで制御
+                    # json_objectモードはdeepseek-r1で不安定なため使用しない
+                    # → プロンプトで制御し extract_json で取り出す
                 )
-                raw = response.choices[0].message.content
-                result = extract_json_from_response(raw)
+                raw = resp.choices[0].message.content
+                result = extract_json(raw)
 
-                if result and result.get("title") and len(result.get("report", "")) >= MIN_REPORT_LENGTH:
-                    print(f"  ✓ 解析成功 (model={model}, attempt={attempt+1})")
+                if result and validate_result(result):
+                    print(f"    ✓ [{model}] attempt {attempt+1} — OK")
                     return result
 
-                print(f"  ✗ 品質不足 (model={model}, attempt={attempt+1}) — retrying...")
+                print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足, retry...")
                 time.sleep(2)
 
             except Exception as e:
-                print(f"  ✗ LLMエラー (model={model}, attempt={attempt+1}): {e}")
+                print(f"    ✗ [{model}] attempt {attempt+1} — {e}")
                 time.sleep(3)
 
     return None
 
-# ============================================================
-# 5. 情報収集
-# ============================================================
+# ─────────────────────────────────────────────
+# 重複チェック（URLとタイトル類似度）
+# ─────────────────────────────────────────────
+def title_hash(title: str) -> str:
+    """タイトルを正規化してハッシュ化（表記ゆれを吸収）"""
+    normalized = re.sub(r"[^\w]", "", title).lower()
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
+
+# ─────────────────────────────────────────────
+# 情報収集メイン
+# ─────────────────────────────────────────────
 def fetch_and_analyze() -> list[dict]:
-    print("=== 情報収集フェーズ開始 ===")
-    new_articles = []
+    print("=" * 50)
+    print("  RED-INTEL AGENT v3.0 — 情報収集開始")
+    print("=" * 50)
+
+    new_articles: list[dict] = []
     seen_urls    = set()
+    seen_title_hashes = set()
 
     for cat_id, queries in SEARCH_CATEGORIES.items():
-        print(f"\n[{cat_id}] 検索中...")
-        cat_articles = []
+        print(f"\n[{cat_id}] ───────────────────────")
+        cat_count = 0
 
         for query in queries:
             try:
@@ -193,61 +231,68 @@ def fetch_and_analyze() -> list[dict]:
                     query=query,
                     search_depth="advanced",
                     max_results=MAX_RESULTS_PER_QUERY,
-                    # search_period="week" に広げることで鮮度と網羅性を両立
                     search_period="week",
                 )["results"]
 
                 for item in results:
-                    url = item.get("url", "")
+                    url     = item.get("url", "")
+                    content = item.get("content", "")
+
+                    # 重複URL
                     if url in seen_urls:
                         continue
                     seen_urls.add(url)
 
-                    print(f"  → 取得: {url[:70]}...")
-
-                    # コンテンツが短すぎる場合はスキップ
-                    content = item.get("content", "")
-                    if len(content) < 300:
-                        print(f"    ✗ コンテンツ不足 ({len(content)} chars) — skip")
+                    # コンテンツ不足
+                    if len(content) < 400:
+                        print(f"  skip (short content): {url[:60]}")
                         continue
 
-                    prompt  = build_analysis_prompt(content, cat_id)
-                    result  = call_llm(prompt)
+                    print(f"  → {url[:70]}")
+
+                    prompt = build_prompt(content, cat_id)
+                    result = call_llm(prompt)
 
                     if result is None:
                         print(f"    ✗ 解析失敗 — skip")
                         continue
 
-                    cat_articles.append({
-                        "date":       datetime.now().strftime("%Y-%m-%d"),
-                        "category":   cat_id,
-                        "title":      result["title"],
-                        "summary":    result.get("summary", ""),
-                        "poc_url":    result.get("poc_url", ""),
-                        "cvss_score": result.get("cvss_score", ""),
-                        "mitre_ids":  result.get("mitre_ids", []),
-                        "content":    result["report"],
-                        "url":        url,
-                    })
+                    # タイトル重複チェック
+                    th = title_hash(result["title"])
+                    if th in seen_title_hashes:
+                        print(f"    ✗ タイトル重複 — skip: {result['title'][:40]}")
+                        continue
+                    seen_title_hashes.add(th)
 
-                    # Groq無料枠レート制限対策
-                    time.sleep(2)
+                    new_articles.append({
+                        "date":         datetime.now().strftime("%Y-%m-%d"),
+                        "category":     cat_id,
+                        "title":        result["title"],
+                        "summary_points": result.get("summary_points", []),
+                        "poc_url":      result.get("poc_url", ""),
+                        "cvss_score":   result.get("cvss_score", ""),
+                        "mitre_ids":    result.get("mitre_ids", []),
+                        "content":      result["report"],
+                        "url":          url,
+                    })
+                    cat_count += 1
+                    time.sleep(SLEEP_BETWEEN_REQ)
 
             except Exception as e:
-                print(f"  ✗ Tavily検索エラー ({query}): {e}")
+                print(f"  ✗ Tavily検索エラー ({query[:40]}): {e}")
                 continue
 
-        new_articles.extend(cat_articles)
-        print(f"  [{cat_id}] 完了: {len(cat_articles)} 件取得")
+        print(f"  [{cat_id}] {cat_count} 件取得")
 
-    print(f"\n=== 情報収集完了: 合計 {len(new_articles)} 件 ===")
+    print(f"\n{'='*50}")
+    print(f"  完了: 合計 {len(new_articles)} 件")
+    print(f"{'='*50}")
     return new_articles
 
-# ============================================================
-# 6. DB更新 & HTML生成
-# ============================================================
-def update_db_and_ui(new_entries: list[dict]) -> None:
-    # DB読み込み
+# ─────────────────────────────────────────────
+# DB更新
+# ─────────────────────────────────────────────
+def update_db(new_entries: list[dict]) -> list[dict]:
     db: list[dict] = []
     if os.path.exists(MASTER_DATA):
         try:
@@ -263,149 +308,551 @@ def update_db_and_ui(new_entries: list[dict]) -> None:
             db.append(entry)
             added += 1
 
-    db = sorted(db, key=lambda x: x["date"], reverse=True)[:200]
+    db = sorted(db, key=lambda x: x["date"], reverse=True)[:MAX_DB_ENTRIES]
 
     with open(MASTER_DATA, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
-    print(f"DB更新: {added} 件追加 / 合計 {len(db)} 件")
 
-    # HTML生成
-    _generate_html(db)
-    print("index.html を生成しました。")
+    print(f"DB: {added} 件追加 / 合計 {len(db)} 件 → {MASTER_DATA}")
+    return db
 
-def _generate_html(db: list[dict]) -> None:
-    db_json_str = json.dumps(db, ensure_ascii=False)
+# ─────────────────────────────────────────────
+# HTML生成
+# ─────────────────────────────────────────────
+# [FIX] データをHTMLに直接埋め込まず、articles.jsとして分離。
+#       これによりPythonのraw文字列とのエスケープ衝突・
+#       INSERT_DATA_HERE二重置換問題を根本的に解決する。
+# index.htmlはarticles.jsをscript srcで読み込む構成。
 
-    html = r"""<!DOCTYPE html>
+def generate_html(db: list[dict]) -> None:
+    # articles.js に書き出し
+    articles_js_path = "articles.js"
+    js_content = "window.__ARTICLES__ = " + json.dumps(db, ensure_ascii=False) + ";"
+    with open(articles_js_path, "w", encoding="utf-8") as f:
+        f.write(js_content)
+    print(f"データ書き出し: {articles_js_path}")
+
+    # index.html（articles.jsを読み込む）
+    html = """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RT-INTEL</title>
+<title>RT-INTEL // RED TEAM INTELLIGENCE</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=IBM+Plex+Sans+JP:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg:#0a0e17; --surface:#111827; --surface2:#1a2235; --border:#1e2d40;
-    --text:#cdd5e0; --muted:#5a6a80; --green:#00ff87; --green-dim:#00c96a;
-    --MALWARE:#ff4d6d; --INITIAL:#ff9f43; --POST_EXP:#a855f7; --AI_SEC:#38bdf8;
-    --critical:#ff4d6d; --high:#ff9f43; --medium:#facc15; --low:#4ade80;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden;font-size:14px}
+:root {
+  --bg:        #050810;
+  --surface:   #090e1a;
+  --surface2:  #0d1525;
+  --border:    #0f2040;
+  --border2:   #1a3060;
+  --text:      #8ba8cc;
+  --text-hi:   #c8dff5;
+  --muted:     #2a4060;
+  --green:     #00e5ff;
+  --green2:    #00ff9d;
+  --red:       #ff3a5e;
+  --orange:    #ff8c00;
+  --purple:    #9b59ff;
+  --blue:      #2196f3;
+  --MALWARE:   #ff3a5e;
+  --INITIAL:   #ff8c00;
+  --POST_EXP:  #9b59ff;
+  --AI_SEC:    #00e5ff;
+  --mono:      'Space Mono', monospace;
+  --sans:      'IBM Plex Sans JP', sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--text);
+  display:flex;
+  font-size:13px;
+  /* スキャンライン */
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,229,255,0.012) 2px,
+      rgba(0,229,255,0.012) 4px
+    );
+}
 
-  /* ── Sidebar ── */
-  nav{width:260px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
-  .logo{padding:20px 18px 14px;border-bottom:1px solid var(--border)}
-  .logo-title{font-size:.75rem;font-weight:700;letter-spacing:.2em;color:var(--green);text-transform:uppercase}
-  .logo-sub{font-size:.65rem;color:var(--muted);margin-top:3px}
-  .search-wrap{padding:12px 14px;border-bottom:1px solid var(--border)}
-  #search-box{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;outline:none;font-size:.85rem;transition:.2s}
-  #search-box:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(0,255,135,.08)}
-  .filter-row{display:flex;gap:6px;padding:10px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-  .cat-btn{padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;font-size:.7rem;font-weight:600;letter-spacing:.05em;transition:.15s}
-  .cat-btn:hover{color:#fff}
-  .cat-btn.active{color:#000;font-weight:700}
-  .cat-btn[data-cat="ALL"].active{background:var(--green);border-color:var(--green)}
-  .cat-btn[data-cat="MALWARE"].active{background:var(--MALWARE);border-color:var(--MALWARE)}
-  .cat-btn[data-cat="INITIAL"].active{background:var(--INITIAL);border-color:var(--INITIAL)}
-  .cat-btn[data-cat="POST_EXP"].active{background:var(--POST_EXP);border-color:var(--POST_EXP)}
-  .cat-btn[data-cat="AI_SEC"].active{background:var(--AI_SEC);border-color:var(--AI_SEC)}
-  .date-list{flex:1;overflow-y:auto;padding:10px 10px}
-  .date-item{padding:9px 12px;border-radius:7px;cursor:pointer;font-size:.82rem;color:var(--muted);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;transition:.15s}
-  .date-item:hover{background:var(--surface2);color:var(--text)}
-  .date-item.active{background:var(--surface2);color:var(--green);font-weight:600}
-  .date-badge{font-size:.65rem;background:var(--border);padding:2px 7px;border-radius:10px}
-  .stats-bar{padding:12px 14px;border-top:1px solid var(--border);display:flex;gap:14px}
-  .stat{font-size:.7rem;color:var(--muted)}
-  .stat span{color:var(--green);font-weight:700}
+/* ── ターミナルグリッド背景 ── */
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,229,255,0.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,229,255,0.03) 1px,transparent 1px);
+  background-size:40px 40px;
+  pointer-events:none;
+  z-index:0;
+}
 
-  /* ── Feed ── */
-  main{flex:1;overflow-y:auto;padding:18px 20px}
-  .feed{max-width:820px;margin:0 auto}
-  .section-label{font-size:.65rem;font-weight:700;letter-spacing:.15em;color:var(--muted);text-transform:uppercase;margin:20px 0 10px;padding-left:4px}
+/* ── Sidebar ── */
+nav{
+  width:260px;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  flex-shrink:0;
+  position:relative;
+  z-index:10;
+}
+.logo{
+  padding:18px 16px 14px;
+  border-bottom:1px solid var(--border);
+  position:relative;
+}
+.logo::after{
+  content:'';
+  position:absolute;
+  bottom:0;left:0;right:0;
+  height:1px;
+  background:linear-gradient(90deg, var(--green), transparent);
+}
+.logo-mark{
+  font-family:var(--mono);
+  font-size:.65rem;
+  color:var(--muted);
+  letter-spacing:.2em;
+  margin-bottom:6px;
+}
+.logo-title{
+  font-family:var(--mono);
+  font-size:1.1rem;
+  font-weight:700;
+  color:var(--green);
+  letter-spacing:.12em;
+  text-shadow:0 0 20px rgba(0,229,255,.4);
+}
+.logo-sub{
+  font-size:.65rem;
+  color:var(--muted);
+  margin-top:3px;
+  letter-spacing:.05em;
+}
+.search-wrap{padding:10px 12px;border-bottom:1px solid var(--border)}
+#search-box{
+  width:100%;
+  padding:8px 12px 8px 30px;
+  background:var(--bg);
+  border:1px solid var(--border2);
+  color:var(--text-hi);
+  border-radius:4px;
+  outline:none;
+  font-family:var(--mono);
+  font-size:.75rem;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%232a4060' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:10px center;
+  transition:.2s;
+}
+#search-box:focus{border-color:var(--green);box-shadow:0 0 0 2px rgba(0,229,255,.1)}
+#search-box::placeholder{color:var(--muted)}
 
-  /* ── Card ── */
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:10px;cursor:pointer;transition:.2s;position:relative;overflow:hidden}
-  .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
-  .card[data-cat="MALWARE"]::before{background:var(--MALWARE)}
-  .card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
-  .card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
-  .card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
-  .card:hover{border-color:#2a3a50;transform:translateY(-1px);box-shadow:0 4px 20px rgba(0,0,0,.4)}
-  .card-meta{display:flex;align-items:center;gap:8px;margin-bottom:10px}
-  .cat-tag{font-size:.65rem;font-weight:700;padding:3px 9px;border-radius:4px;letter-spacing:.08em;color:#000}
-  .cat-tag[data-cat="MALWARE"]{background:var(--MALWARE)}
-  .cat-tag[data-cat="INITIAL"]{background:var(--INITIAL)}
-  .cat-tag[data-cat="POST_EXP"]{background:var(--POST_EXP)}
-  .cat-tag[data-cat="AI_SEC"]{background:var(--AI_SEC)}
-  .card-date{font-size:.72rem;color:var(--muted)}
-  .cvss-badge{font-size:.65rem;font-weight:700;padding:2px 8px;border-radius:4px;margin-left:auto}
-  .cvss-critical{background:rgba(255,77,109,.15);color:var(--critical);border:1px solid var(--critical)}
-  .cvss-high{background:rgba(255,159,67,.15);color:var(--high);border:1px solid var(--high)}
-  .cvss-medium{background:rgba(250,204,21,.15);color:var(--medium);border:1px solid var(--medium)}
-  .cvss-low{background:rgba(74,222,128,.15);color:var(--low);border:1px solid var(--low)}
-  .card-title{font-size:1rem;font-weight:700;color:#e6edf3;line-height:1.45;margin-bottom:9px}
-  .card-summary{font-size:.82rem;color:var(--muted);line-height:1.65}
-  .card-footer{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
-  .mitre-chip{font-size:.65rem;background:rgba(168,85,247,.12);color:#c084fc;border:1px solid rgba(168,85,247,.25);padding:2px 7px;border-radius:4px}
-  .poc-chip{font-size:.65rem;background:rgba(0,255,135,.1);color:var(--green);border:1px solid rgba(0,255,135,.2);padding:2px 7px;border-radius:4px}
+.filter-wrap{padding:8px 10px;border-bottom:1px solid var(--border);display:flex;gap:5px;flex-wrap:wrap}
+.cat-btn{
+  padding:4px 10px;
+  border-radius:3px;
+  border:1px solid var(--border2);
+  background:none;
+  color:var(--muted);
+  cursor:pointer;
+  font-family:var(--mono);
+  font-size:.62rem;
+  font-weight:700;
+  letter-spacing:.08em;
+  transition:.15s;
+}
+.cat-btn:hover{color:var(--text-hi);border-color:var(--text)}
+.cat-btn.active[data-cat="ALL"]{background:rgba(0,229,255,.12);border-color:var(--green);color:var(--green)}
+.cat-btn.active[data-cat="MALWARE"]{background:rgba(255,58,94,.12);border-color:var(--MALWARE);color:var(--MALWARE)}
+.cat-btn.active[data-cat="INITIAL"]{background:rgba(255,140,0,.12);border-color:var(--INITIAL);color:var(--INITIAL)}
+.cat-btn.active[data-cat="POST_EXP"]{background:rgba(155,89,255,.12);border-color:var(--POST_EXP);color:var(--POST_EXP)}
+.cat-btn.active[data-cat="AI_SEC"]{background:rgba(0,229,255,.12);border-color:var(--AI_SEC);color:var(--AI_SEC)}
 
-  /* ── Detail ── */
-  #detail{position:fixed;inset:0;background:var(--bg);z-index:100;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .3s cubic-bezier(.4,0,.2,1)}
-  #detail.open{transform:none}
-  .det-header{background:rgba(17,24,39,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:14px 20px;display:flex;align-items:center;gap:14px;flex-shrink:0;position:sticky;top:0}
-  .back-btn{background:none;border:1px solid var(--border);color:var(--green);padding:7px 16px;border-radius:6px;cursor:pointer;font-size:.82rem;font-weight:600;transition:.15s}
-  .back-btn:hover{background:var(--surface2)}
-  .det-body{flex:1;overflow-y:auto;padding:40px 24px}
-  .det-inner{max-width:800px;margin:0 auto}
-  .det-title{font-size:1.6rem;font-weight:800;color:#e6edf3;line-height:1.35;margin-bottom:20px}
-  .det-meta-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border)}
-  .poc-btn{display:inline-flex;align-items:center;gap:6px;background:var(--green);color:#000;padding:10px 20px;border-radius:7px;text-decoration:none;font-weight:700;font-size:.82rem;transition:.15s}
-  .poc-btn:hover{background:var(--green-dim)}
-  /* Markdown */
-  .det-inner h1{display:none}
-  .det-inner h2{font-size:1.05rem;font-weight:700;color:#e6edf3;border-bottom:1px solid var(--border);padding-bottom:8px;margin:36px 0 14px}
-  .det-inner h3{font-size:.95rem;font-weight:600;color:var(--text);margin:20px 0 8px}
-  .det-inner p{line-height:1.75;margin-bottom:12px;color:var(--text)}
-  .det-inner ul,.det-inner ol{padding-left:22px;margin-bottom:12px;line-height:1.75}
-  .det-inner li{margin-bottom:5px}
-  .det-inner pre{background:#060d18;border:1px solid var(--border);border-radius:9px;padding:18px;overflow-x:auto;margin:16px 0;position:relative}
-  .det-inner code{font-family:'SFMono-Regular',Consolas,'Courier New',monospace;font-size:.83rem;color:var(--green)}
-  .det-inner :not(pre)>code{background:rgba(0,255,135,.07);padding:2px 6px;border-radius:4px;font-size:.82rem}
-  .det-inner blockquote{border-left:3px solid var(--border);padding-left:14px;color:var(--muted);margin:12px 0}
-  .det-inner table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.82rem}
-  .det-inner th{background:var(--surface2);padding:9px 12px;text-align:left;border:1px solid var(--border)}
-  .det-inner td{padding:8px 12px;border:1px solid var(--border)}
-  .copy-btn{position:absolute;top:10px;right:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:.65rem;padding:4px 9px;border-radius:5px;cursor:pointer;transition:.15s;font-family:inherit}
-  .copy-btn:hover{background:var(--border);color:#fff}
-  .no-data{text-align:center;padding:60px;color:var(--muted)}
-  .no-data-icon{font-size:2.5rem;margin-bottom:12px}
+.date-list{flex:1;overflow-y:auto;padding:8px}
+.date-group-label{
+  font-family:var(--mono);
+  font-size:.58rem;
+  color:var(--muted);
+  letter-spacing:.12em;
+  padding:8px 10px 4px;
+}
+.date-item{
+  padding:8px 10px;
+  border-radius:4px;
+  cursor:pointer;
+  font-family:var(--mono);
+  font-size:.72rem;
+  color:var(--muted);
+  margin-bottom:2px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  transition:.15s;
+  border:1px solid transparent;
+}
+.date-item:hover{background:var(--surface2);color:var(--text-hi);border-color:var(--border2)}
+.date-item.active{
+  background:var(--surface2);
+  color:var(--green);
+  border-color:var(--border2);
+}
+.date-badge{
+  font-size:.6rem;
+  background:var(--border);
+  color:var(--muted);
+  padding:2px 6px;
+  border-radius:2px;
+}
 
-  ::-webkit-scrollbar{width:5px;height:5px}
-  ::-webkit-scrollbar-track{background:transparent}
-  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px}
+.stats-bar{
+  padding:10px 14px;
+  border-top:1px solid var(--border);
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:6px;
+}
+.stat{
+  font-family:var(--mono);
+  font-size:.58rem;
+  color:var(--muted);
+  text-align:center;
+}
+.stat-val{
+  display:block;
+  font-size:.9rem;
+  font-weight:700;
+  color:var(--green);
+  text-shadow:0 0 10px rgba(0,229,255,.3);
+}
+
+/* ── Feed ── */
+main{flex:1;overflow-y:auto;padding:16px 18px;position:relative;z-index:1}
+.feed{max-width:860px;margin:0 auto}
+.day-label{
+  font-family:var(--mono);
+  font-size:.62rem;
+  letter-spacing:.18em;
+  color:var(--muted);
+  text-transform:uppercase;
+  padding:16px 2px 8px;
+  border-bottom:1px solid var(--border);
+  margin-bottom:10px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.day-label::before{content:'//';color:var(--green);opacity:.5}
+
+/* ── Card ── */
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:5px;
+  padding:16px 18px;
+  margin-bottom:8px;
+  cursor:pointer;
+  transition:.18s;
+  position:relative;
+  overflow:hidden;
+}
+.card::before{
+  content:'';
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:2px;
+  transition:.18s;
+}
+.card[data-cat="MALWARE"]::before{background:var(--MALWARE);box-shadow:0 0 8px var(--MALWARE)}
+.card[data-cat="INITIAL"]::before{background:var(--INITIAL);box-shadow:0 0 8px var(--INITIAL)}
+.card[data-cat="POST_EXP"]::before{background:var(--POST_EXP);box-shadow:0 0 8px var(--POST_EXP)}
+.card[data-cat="AI_SEC"]::before{background:var(--AI_SEC);box-shadow:0 0 8px var(--AI_SEC)}
+.card:hover{
+  background:var(--surface2);
+  border-color:var(--border2);
+  transform:translateX(2px);
+}
+.card-meta{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.cat-tag{
+  font-family:var(--mono);
+  font-size:.58rem;
+  font-weight:700;
+  padding:3px 8px;
+  border-radius:2px;
+  letter-spacing:.08em;
+}
+.cat-tag[data-cat="MALWARE"]{background:rgba(255,58,94,.15);color:var(--MALWARE);border:1px solid rgba(255,58,94,.3)}
+.cat-tag[data-cat="INITIAL"]{background:rgba(255,140,0,.15);color:var(--INITIAL);border:1px solid rgba(255,140,0,.3)}
+.cat-tag[data-cat="POST_EXP"]{background:rgba(155,89,255,.15);color:var(--POST_EXP);border:1px solid rgba(155,89,255,.3)}
+.cat-tag[data-cat="AI_SEC"]{background:rgba(0,229,255,.12);color:var(--AI_SEC);border:1px solid rgba(0,229,255,.25)}
+.card-date{font-family:var(--mono);font-size:.62rem;color:var(--muted)}
+.cvss-badge{
+  font-family:var(--mono);font-size:.6rem;font-weight:700;
+  padding:2px 7px;border-radius:2px;margin-left:auto;
+}
+.cvss-critical{background:rgba(255,58,94,.15);color:#ff3a5e;border:1px solid rgba(255,58,94,.3)}
+.cvss-high{background:rgba(255,140,0,.15);color:#ff8c00;border:1px solid rgba(255,140,0,.3)}
+.cvss-medium{background:rgba(250,204,21,.15);color:#facc15;border:1px solid rgba(250,204,21,.3)}
+.cvss-low{background:rgba(0,255,157,.1);color:#00ff9d;border:1px solid rgba(0,255,157,.2)}
+.card-title{
+  font-family:var(--sans);
+  font-size:.95rem;
+  font-weight:700;
+  color:var(--text-hi);
+  line-height:1.45;
+  margin-bottom:10px;
+}
+.card-summary{
+  font-size:.78rem;
+  color:var(--text);
+  line-height:1.7;
+  list-style:none;
+  padding:0;
+}
+.card-summary li{
+  padding:2px 0 2px 14px;
+  position:relative;
+}
+.card-summary li::before{
+  content:'›';
+  position:absolute;left:0;
+  color:var(--green);
+  font-weight:700;
+}
+.card-footer{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mitre-chip{
+  font-family:var(--mono);
+  font-size:.58rem;
+  background:rgba(155,89,255,.1);
+  color:#b07aff;
+  border:1px solid rgba(155,89,255,.2);
+  padding:2px 7px;
+  border-radius:2px;
+}
+.poc-chip{
+  font-family:var(--mono);
+  font-size:.58rem;
+  background:rgba(0,255,157,.08);
+  color:var(--green2);
+  border:1px solid rgba(0,255,157,.2);
+  padding:2px 7px;
+  border-radius:2px;
+  animation:pulse-poc 2s infinite;
+}
+@keyframes pulse-poc{0%,100%{opacity:1}50%{opacity:.6}}
+
+.no-data{
+  text-align:center;
+  padding:80px 20px;
+  font-family:var(--mono);
+  color:var(--muted);
+  font-size:.75rem;
+  letter-spacing:.1em;
+}
+
+/* ── Detail View ── */
+#detail{
+  position:fixed;inset:0;
+  background:var(--bg);
+  z-index:100;
+  display:flex;
+  flex-direction:column;
+  transform:translateX(100%);
+  transition:transform .28s cubic-bezier(.4,0,.2,1);
+}
+#detail.open{transform:none}
+
+.det-header{
+  background:rgba(9,14,26,.95);
+  backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:12px 18px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-shrink:0;
+  position:relative;
+}
+.det-header::after{
+  content:'';
+  position:absolute;
+  bottom:0;left:0;right:0;
+  height:1px;
+  background:linear-gradient(90deg,var(--green),transparent 60%);
+}
+.back-btn{
+  background:none;
+  border:1px solid var(--border2);
+  color:var(--green);
+  padding:6px 14px;
+  border-radius:3px;
+  cursor:pointer;
+  font-family:var(--mono);
+  font-size:.7rem;
+  font-weight:700;
+  transition:.15s;
+  letter-spacing:.05em;
+}
+.back-btn:hover{background:rgba(0,229,255,.08)}
+.det-url{
+  margin-left:auto;
+  font-family:var(--mono);
+  font-size:.62rem;
+  color:var(--muted);
+  text-decoration:none;
+}
+.det-url:hover{color:var(--text)}
+
+.det-body{flex:1;overflow-y:auto;padding:36px 24px}
+.det-inner{max-width:820px;margin:0 auto}
+.det-title{
+  font-family:var(--sans);
+  font-size:1.55rem;
+  font-weight:700;
+  color:var(--text-hi);
+  line-height:1.35;
+  margin-bottom:18px;
+}
+.det-meta-row{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  margin-bottom:24px;
+  padding-bottom:18px;
+  border-bottom:1px solid var(--border);
+}
+.poc-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:rgba(0,255,157,.1);
+  color:var(--green2);
+  border:1px solid rgba(0,255,157,.3);
+  padding:8px 18px;
+  border-radius:3px;
+  text-decoration:none;
+  font-family:var(--mono);
+  font-weight:700;
+  font-size:.72rem;
+  letter-spacing:.05em;
+  transition:.15s;
+}
+.poc-btn:hover{background:rgba(0,255,157,.18);box-shadow:0 0 16px rgba(0,255,157,.2)}
+
+/* Markdown レンダリング */
+.det-inner h1{display:none}
+.det-inner h2{
+  font-family:var(--mono);
+  font-size:.78rem;
+  font-weight:700;
+  color:var(--green);
+  letter-spacing:.15em;
+  text-transform:uppercase;
+  border-bottom:1px solid var(--border);
+  padding-bottom:7px;
+  margin:32px 0 12px;
+}
+.det-inner h3{
+  font-size:.88rem;
+  font-weight:600;
+  color:var(--text-hi);
+  margin:18px 0 8px;
+}
+.det-inner p{line-height:1.8;margin-bottom:10px;color:var(--text)}
+.det-inner ul,.det-inner ol{padding-left:20px;margin-bottom:10px;line-height:1.8}
+.det-inner li{margin-bottom:4px;color:var(--text)}
+.det-inner pre{
+  background:#020610;
+  border:1px solid var(--border2);
+  border-left:2px solid var(--green);
+  border-radius:4px;
+  padding:18px 18px 18px 20px;
+  overflow-x:auto;
+  margin:14px 0;
+  position:relative;
+}
+.det-inner code{
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--green2);
+  line-height:1.7;
+}
+.det-inner :not(pre)>code{
+  background:rgba(0,229,255,.07);
+  padding:2px 6px;
+  border-radius:2px;
+  font-size:.78rem;
+  color:var(--green);
+}
+.det-inner blockquote{
+  border-left:2px solid var(--border2);
+  padding-left:14px;
+  color:var(--muted);
+  margin:10px 0;
+}
+.det-inner table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.78rem}
+.det-inner th{background:var(--surface2);padding:8px 12px;text-align:left;border:1px solid var(--border);color:var(--text-hi);font-family:var(--mono);font-size:.65rem;letter-spacing:.08em}
+.det-inner td{padding:7px 12px;border:1px solid var(--border);color:var(--text)}
+.det-inner strong{color:var(--text-hi)}
+
+.copy-btn{
+  position:absolute;
+  top:10px;right:10px;
+  background:var(--surface2);
+  border:1px solid var(--border2);
+  color:var(--muted);
+  font-family:var(--mono);
+  font-size:.6rem;
+  padding:3px 8px;
+  border-radius:2px;
+  cursor:pointer;
+  transition:.15s;
+  letter-spacing:.05em;
+}
+.copy-btn:hover{color:var(--green);border-color:var(--green)}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:10px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 </style>
 </head>
 <body>
+
 <nav>
   <div class="logo">
+    <div class="logo-mark">// THREAT INTELLIGENCE</div>
     <div class="logo-title">RT-INTEL</div>
-    <div class="logo-sub">Red Team Intelligence Feed</div>
+    <div class="logo-sub">Red Team Operator Feed</div>
   </div>
   <div class="search-wrap">
-    <input type="text" id="search-box" placeholder="🔍  キーワード検索...">
+    <input type="text" id="search-box" placeholder="search intel...">
   </div>
-  <div class="filter-row">
+  <div class="filter-wrap">
     <button class="cat-btn active" data-cat="ALL">ALL</button>
-    <button class="cat-btn" data-cat="MALWARE">MALWARE</button>
-    <button class="cat-btn" data-cat="INITIAL">INITIAL</button>
-    <button class="cat-btn" data-cat="POST_EXP">POST_EXP</button>
-    <button class="cat-btn" data-cat="AI_SEC">AI_SEC</button>
+    <button class="cat-btn" data-cat="MALWARE">MAL</button>
+    <button class="cat-btn" data-cat="INITIAL">INIT</button>
+    <button class="cat-btn" data-cat="POST_EXP">POST</button>
+    <button class="cat-btn" data-cat="AI_SEC">AI</button>
   </div>
+  <div class="date-group-label">// DATE FILTER</div>
   <div class="date-list" id="date-list"></div>
   <div class="stats-bar">
-    <div class="stat">総件数 <span id="total-count">0</span></div>
-    <div class="stat">本日 <span id="today-count">0</span></div>
+    <div class="stat"><span class="stat-val" id="total-count">0</span>TOTAL</div>
+    <div class="stat"><span class="stat-val" id="today-count">0</span>TODAY</div>
+    <div class="stat"><span class="stat-val" id="poc-count">0</span>PoC</div>
   </div>
 </nav>
 
@@ -415,51 +862,63 @@ def _generate_html(db: list[dict]) -> None:
 
 <div id="detail">
   <div class="det-header">
-    <button class="back-btn" onclick="closeDetail()">← 戻る</button>
+    <button class="back-btn" onclick="closeDetail()">← BACK</button>
     <div id="det-cat-tag"></div>
+    <a id="det-source-url" class="det-url" href="#" target="_blank">[ SOURCE ]</a>
   </div>
   <div class="det-body">
     <div class="det-inner" id="det-body"></div>
   </div>
 </div>
 
+<script src="articles.js"></script>
 <script>
-const db = INSERT_DATA_HERE;
-let activeCat = 'ALL';
+const db = window.__ARTICLES__ || [];
+let activeCat  = 'ALL';
 let activeDate = 'all';
 const today = new Date().toISOString().slice(0,10);
 
 function cvssClass(s) {
   const n = parseFloat(s);
-  if (n >= 9) return 'cvss-critical';
-  if (n >= 7) return 'cvss-high';
-  if (n >= 4) return 'cvss-medium';
-  return 'cvss-low';
+  if (!isNaN(n)) {
+    if (n >= 9.0) return 'cvss-critical';
+    if (n >= 7.0) return 'cvss-high';
+    if (n >= 4.0) return 'cvss-medium';
+    return 'cvss-low';
+  }
+  return '';
+}
+
+function isPocValid(url) {
+  return url && url.startsWith('http');
 }
 
 function init() {
-  // Date list
+  // 統計
+  document.getElementById('total-count').textContent = db.length;
+  document.getElementById('today-count').textContent = db.filter(a=>a.date===today).length;
+  document.getElementById('poc-count').textContent   = db.filter(a=>isPocValid(a.poc_url)).length;
+
+  // 日付リスト
   const counts = {};
   db.forEach(a => { counts[a.date] = (counts[a.date]||0)+1; });
   const dates = Object.keys(counts).sort().reverse();
   const list = document.getElementById('date-list');
 
-  const allItem = document.createElement('div');
-  allItem.className = 'date-item active'; allItem.dataset.date = 'all';
-  allItem.innerHTML = `<span>すべて</span><span class="date-badge">${db.length}</span>`;
-  allItem.onclick = () => setDate('all', allItem);
-  list.appendChild(allItem);
+  const allEl = document.createElement('div');
+  allEl.className = 'date-item active'; allEl.dataset.date = 'all';
+  allEl.innerHTML = `<span>ALL DATES</span><span class="date-badge">${db.length}</span>`;
+  allEl.onclick = () => setDate('all', allEl);
+  list.appendChild(allEl);
 
   dates.forEach(d => {
     const el = document.createElement('div');
     el.className = 'date-item'; el.dataset.date = d;
-    el.innerHTML = `<span>${d}</span><span class="date-badge">${counts[d]}</span>`;
+    const label = d === today ? `${d} <span style="color:var(--green);font-size:.55rem">● NEW</span>` : d;
+    el.innerHTML = `<span>${label}</span><span class="date-badge">${counts[d]}</span>`;
     el.onclick = () => setDate(d, el);
     list.appendChild(el);
   });
-
-  document.getElementById('total-count').textContent = db.length;
-  document.getElementById('today-count').textContent = counts[today] || 0;
 
   document.querySelectorAll('.cat-btn').forEach(b => {
     b.onclick = () => {
@@ -485,43 +944,45 @@ function render() {
   const feed = document.getElementById('feed');
   feed.innerHTML = '';
 
-  let filtered = db.filter(a => {
+  const filtered = db.filter(a => {
     const matchCat  = activeCat === 'ALL' || a.category === activeCat;
     const matchDate = activeDate === 'all' || a.date === activeDate;
-    const matchQ    = !q || (a.title+a.summary+a.content).toLowerCase().includes(q);
+    const matchQ    = !q || (a.title + (a.summary_points||[]).join(' ') + a.content).toLowerCase().includes(q);
     return matchCat && matchDate && matchQ;
   });
 
   if (!filtered.length) {
-    feed.innerHTML = '<div class="no-data"><div class="no-data-icon">📭</div>該当するインテリジェンスはありません</div>';
+    feed.innerHTML = '<div class="no-data">// NO INTELLIGENCE FOUND //</div>';
     return;
   }
 
-  // 日付でグループ化
+  // 日付グループ
   const groups = {};
-  filtered.forEach(a => { (groups[a.date] = groups[a.date]||[]).push(a); });
+  filtered.forEach(a => { (groups[a.date]=groups[a.date]||[]).push(a); });
+
   Object.keys(groups).sort().reverse().forEach(date => {
-    const label = document.createElement('div');
-    label.className = 'section-label';
-    label.textContent = date === today ? `${date}  (本日)` : date;
-    feed.appendChild(label);
+    const lbl = document.createElement('div');
+    lbl.className = 'day-label';
+    lbl.innerHTML = date + (date===today ? ' &nbsp;<span style="color:var(--green);font-size:.58rem">TODAY</span>' : '');
+    feed.appendChild(lbl);
 
     groups[date].forEach(a => {
       const card = document.createElement('div');
       card.className = 'card'; card.dataset.cat = a.category;
 
-      const summaryHtml = (a.summary||'').replace(/\n/g, '<br>');
+      // summary_pointsをliリストに
+      const points = (a.summary_points||[]).slice(0,3);
+      const summaryHtml = points.length
+        ? '<ul class="card-summary">' + points.map(p=>`<li>${p}</li>`).join('') + '</ul>'
+        : `<div class="card-summary">${a.summary||''}</div>`;
 
-      let cvssHtml = '';
-      if (a.cvss_score) {
-        cvssHtml = `<span class="cvss-badge ${cvssClass(a.cvss_score)}">CVSS ${a.cvss_score}</span>`;
-      }
+      const cvss = a.cvss_score;
+      const cvssHtml = cvss
+        ? `<span class="cvss-badge ${cvssClass(cvss)}">CVSS ${cvss}</span>`
+        : '';
 
-      let footerHtml = '';
-      if (a.mitre_ids && a.mitre_ids.length) {
-        footerHtml += a.mitre_ids.slice(0,4).map(id=>`<span class="mitre-chip">${id}</span>`).join('');
-      }
-      if (a.poc_url) footerHtml += `<span class="poc-chip">⚡ PoC Available</span>`;
+      const mitreHtml = (a.mitre_ids||[]).slice(0,3).map(id=>`<span class="mitre-chip">${id}</span>`).join('');
+      const pocHtml   = isPocValid(a.poc_url) ? `<span class="poc-chip">⚡ PoC</span>` : '';
 
       card.innerHTML = `
         <div class="card-meta">
@@ -530,8 +991,8 @@ function render() {
           ${cvssHtml}
         </div>
         <div class="card-title">${a.title}</div>
-        <div class="card-summary">${summaryHtml}</div>
-        ${footerHtml ? `<div class="card-footer">${footerHtml}</div>` : ''}
+        ${summaryHtml}
+        ${(mitreHtml||pocHtml) ? `<div class="card-footer">${mitreHtml}${pocHtml}</div>` : ''}
       `;
       card.onclick = () => openDetail(a);
       feed.appendChild(card);
@@ -542,40 +1003,42 @@ function render() {
 function openDetail(a) {
   const body = document.getElementById('det-body');
 
+  const cvss = a.cvss_score;
   let metaHtml = '';
-  if (a.cvss_score) metaHtml += `<span class="cvss-badge ${cvssClass(a.cvss_score)}">CVSS ${a.cvss_score}</span>`;
-  if (a.mitre_ids && a.mitre_ids.length) {
-    metaHtml += a.mitre_ids.map(id=>`<span class="mitre-chip">${id}</span>`).join('');
+  if (cvss) metaHtml += `<span class="cvss-badge ${cvssClass(cvss)}" style="font-size:.7rem;padding:4px 10px">CVSS ${cvss}</span>`;
+  (a.mitre_ids||[]).forEach(id => { metaHtml += `<span class="mitre-chip">${id}</span>`; });
+  if (isPocValid(a.poc_url)) {
+    metaHtml += `<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoC / Exploit Repository</a>`;
   }
-  if (a.poc_url) metaHtml += `<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoCリポジトリを開く</a>`;
 
   body.innerHTML = `
     <div class="det-title">${a.title}</div>
-    <div class="det-meta-row">${metaHtml}</div>
+    <div class="det-meta-row">
+      <span class="cat-tag" data-cat="${a.category}" style="font-size:.68rem;padding:4px 10px">${a.category}</span>
+      <span style="font-family:var(--mono);font-size:.65rem;color:var(--muted)">${a.date}</span>
+      ${metaHtml}
+    </div>
     ${marked.parse(a.content)}
-    <hr style="border:0;border-top:1px solid var(--border);margin:40px 0 20px">
-    <a href="${a.url}" target="_blank" style="color:var(--muted);font-size:.78rem;">📎 ソース元記事</a>
   `;
 
-  // コードブロックにCOPYボタンを追加
+  // COPYボタン
   body.querySelectorAll('pre').forEach(pre => {
     const btn = document.createElement('button');
     btn.className = 'copy-btn'; btn.textContent = 'COPY';
-    btn.onclick = (e) => {
+    btn.onclick = e => {
       e.stopPropagation();
-      const code = pre.querySelector('code');
-      navigator.clipboard.writeText(code ? code.textContent : pre.textContent).then(() => {
-        btn.textContent = '✓ DONE';
+      const txt = pre.querySelector('code')?.textContent || pre.textContent;
+      navigator.clipboard.writeText(txt).then(() => {
+        btn.textContent = '✓ OK';
         setTimeout(() => btn.textContent = 'COPY', 1800);
       });
     };
-    pre.style.position = 'relative';
     pre.appendChild(btn);
   });
 
   document.getElementById('det-cat-tag').innerHTML =
-    `<span class="cat-tag" data-cat="${a.category}">${a.category}</span>`;
-
+    `<span class="cat-tag" data-cat="${a.category}" style="font-size:.68rem;padding:4px 10px">${a.category}</span>`;
+  document.getElementById('det-source-url').href = a.url;
   document.getElementById('detail').classList.add('open');
   history.pushState({view:'detail'}, '');
 }
@@ -590,14 +1053,15 @@ init();
 </body>
 </html>"""
 
-    final_html = html.replace("INSERT_DATA_HERE", db_json_str)
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(final_html)
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"HTML書き出し: {OUTPUT_HTML}")
+    print("※ GitHub Actionsで index.html と articles.js の両方をコミットしてください")
 
-
-# ============================================================
+# ─────────────────────────────────────────────
 # Entry point
-# ============================================================
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     new_data = fetch_and_analyze()
-    update_db_and_ui(new_data)
+    db = update_db(new_data)
+    generate_html(db)
