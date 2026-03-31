@@ -31,7 +31,7 @@ groq_client = Groq(api_key=GROQ_KEY)
 MASTER_DATA      = "all_articles.json"
 OUTPUT_HTML      = "index.html"
 MAX_DB_ENTRIES   = 200
-MIN_REPORT_LEN   = 300    # 品質フィルタ（max_tokens削減に合わせて調整）
+MIN_REPORT_LEN   = 600    # 品質フィルタ（詳細レポート対応）
 MAX_RETRIES      = 3
 SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
@@ -66,24 +66,91 @@ SEARCH_CATEGORIES = {
 MAX_RESULTS_PER_QUERY = 2
 
 # ─────────────────────────────────────────────
-# プロンプト（攻撃者視点への強制変換）
+# プロンプト（レッドチーム再現手順特化）
 # ─────────────────────────────────────────────
-CATEGORY_FOCUS = {
-    "MALWARE":  "マルウェアのローダー機構・難読化アルゴリズム・C2通信プロトコル・永続化レジストリキーを攻撃者目線で詳述",
-    "INITIAL":  "脆弱性のroot cause（バグの本質）・exploitの具体的トリガー条件・ターゲットバージョン・bypass条件を攻撃者目線で詳述",
-    "POST_EXP": "権限昇格・横断的侵害・認証情報窃取の具体的ツールチェーンとコマンドを攻撃者目線で詳述",
-    "AI_SEC":   "LLM/AIへの攻撃ペイロード例・bypass手法・影響範囲を攻撃者目線で詳述",
+CATEGORY_CONTEXT = {
+    "MALWARE": """
+MALWARE ANALYSIS FOCUS:
+- Internal loader mechanism: how shellcode/PE is decrypted, mapped, executed (specific API calls: VirtualAlloc, WriteProcessMemory, CreateRemoteThread etc.)
+- Obfuscation: exact algorithm (XOR key, RC4, AES-CBC with IV), where key material is stored
+- C2 protocol: HTTP/DNS/custom, beaconing interval, jitter, encoding (base64/custom), URI patterns
+- Persistence: exact registry key path, scheduled task XML, WMI subscription query
+- EDR evasion: AMSI bypass method, ETW patching, direct syscalls, process hollowing target
+""",
+    "INITIAL": """
+INITIAL ACCESS FOCUS:
+- Root cause: exact vulnerable code path, which parameter/header/field triggers the bug
+- Vulnerability class: buffer overflow offset, SQL injection context, deserialization gadget chain, auth logic bypass condition
+- Affected versions: exact version strings, patch commit/advisory reference
+- Exploit trigger: HTTP method, endpoint path, required headers/auth state, payload format
+- Bypass conditions: WAF bypass, auth prerequisite, race condition window
+""",
+    "POST_EXP": """
+POST-EXPLOITATION FOCUS:
+- Privilege escalation: specific misconfiguration (SeImpersonatePrivilege, weak service ACL, unquoted path, token abuse)
+- Lateral movement: exact protocol (SMB/WinRM/DCOM), credential type needed, required ports
+- Credential dumping: LSASS access method (MiniDump, direct read, PPL bypass), SAM/NTDS extraction path
+- AD attack: Kerberoastable SPN list method, RBCD prerequisite, DCSync required rights
+- EDR evasion: process to inject into, which LOLBAS binary, obfuscation needed
+""",
+    "AI_SEC": """
+AI/LLM ATTACK FOCUS:
+- Attack vector: exact injection point (system prompt, tool description, RAG content, user input)
+- Payload mechanism: why the model follows malicious instruction (context confusion, role override, indirect injection)
+- Concrete payload examples: actual strings/templates that trigger the behavior
+- Impact: what attacker-controlled action is executed (exfiltration, SSRF, tool misuse)
+- Bypass technique: how safety filters are circumvented
+""",
 }
 
 def build_prompt(content: str, category: str) -> str:
-    focus = CATEGORY_FOCUS.get(category, "攻撃手法を詳述")
-    return f"""Red team operator report. Focus: {focus}
-Transform source (may be defender-perspective) into attacker-perspective report. Label inferred details [推測].
-Output ONLY valid JSON, no markdown fences, no extra text. Use \\n for newlines in strings.
+    ctx = CATEGORY_CONTEXT.get(category, "")
+    return f"""You are a senior red team operator with 15 years of offensive security experience writing an INTERNAL technical reproduction report.
 
-Schema: {{"title":"日本語見出し30字以内","summary_points":["要点1","要点2","要点3"],"poc_url":"URL or empty","cvss_score":"数値 or empty","mitre_ids":["T1059.001"],"report":"## 概要\\n...\\n## 技術的メカニズム\\n...\\n## 攻撃手順\\n1. ...\\n## 実行コマンド\\n```bash\\n実際のコマンド+オプション+ターゲット例\\n```\\n## MITRE ATT&CK\\n...\\n## 検知・緩和策\\n..."}}
+AUDIENCE: Red team testers who need to reproduce this attack in a lab environment TODAY. Zero tolerance for vague descriptions.
+{ctx}
+STRICT RULES FOR EACH SECTION:
 
-SOURCE:
+[## 概要]
+- 3〜5文で技術的要点を簡潔にまとめる
+- 末尾の1〜2文は必ず「新規性・差異化ポイント」を記載すること:
+  従来の類似攻撃・既知手法と比較して「何が新しいか」「何が従来と違うか」を具体的に述べる
+  例: "従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である"
+  例: "既存のEDR製品がフックするABC APIを一切使用しない点が新しい"
+  情報が不足する場合は同カテゴリの既知手法との差異を推定して [推測] を付与する
+
+[## 脆弱性・脅威の技術的メカニズム]
+- Explain the ROOT CAUSE at a technical depth sufficient to understand WHY the attack works
+- Include: specific API calls, memory layouts, protocol fields, code paths, data structures
+- For CVEs: explain the exact vulnerable condition, not just "improper validation"
+- For malware: explain the internal execution flow step by step
+- Minimum 200 words. No surface-level descriptions.
+
+[## 再現手順（レッドチームテスター向け）]
+- Write as a numbered checklist that a tester can follow in order
+- Each step must be a CONCRETE ACTION: "Install X", "Run Y with Z flags", "Verify by checking W"
+- Include: lab setup requirements, target prerequisites, required credentials/access level
+- If source lacks detail, fill gaps from your knowledge and mark as [推測]
+- Do NOT write "attacker does X" — write "1. Set up listener: ..."
+
+[## 実行コマンド]
+- Every command must be COMPLETE and RUNNABLE with realistic placeholder values
+- Include full flags, not abbreviated. Use 192.168.1.10 as target IP, CORP.LOCAL as domain
+- Show command output verification where relevant
+- Example of REQUIRED quality:
+  BAD:  impacket-secretsdump domain/user@target
+  GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:'P@ssw0rd'@192.168.1.10 -outputfile /tmp/hashes.txt && cat /tmp/hashes.txt
+
+[## MITRE ATT&CK マッピング]
+List specific Technique IDs with sub-technique where applicable (e.g. T1055.012, not just T1055).
+
+[## 検知シグネチャ・緩和策]
+Include at minimum one concrete detection rule (Sigma/YARA/KQL snippet preferred, not prose).
+
+OUTPUT: ONLY a valid JSON object. No markdown fences around the JSON. Use \\n for newlines.
+Schema: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n（3〜5文。末尾に新規性・従来手法との差異を必ず記載）\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知シグネチャ・緩和策\\n```\\n...\\n```"}}
+
+SOURCE ARTICLE:
 {content[:5000]}"""
 
 # ─────────────────────────────────────────────
@@ -148,7 +215,7 @@ def call_llm(prompt: str) -> dict | None:
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=2000,  # 4096→2000 でGroqトークン消費を約半減
+                    max_tokens=3000,  # 詳細レポートに対応
                     # json_objectモードはdeepseek-r1で不安定なため使用しない
                     # → プロンプトで制御し extract_json で取り出す
                 )
@@ -348,26 +415,26 @@ def _build_index_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VORTEX // THREAT INTELLIGENCE</title>
+<title>CIPHER // THREAT INTELLIGENCE</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:      #07100d;
-  --surf:    #0c1712;
-  --surf2:   #111f18;
-  --bdr:     #1b3028;
-  --bdr2:    #274840;
-  --text:    #7aaa8e;
-  --hi:      #d2edd8;
-  --muted:   #2c4035;
-  --acc:     #3dffa0;
+  --bg:      #080d14;
+  --surf:    #0d1220;
+  --surf2:   #111a2e;
+  --bdr:     #162040;
+  --bdr2:    #1e3060;
+  --text:    #7a9ec4;
+  --hi:      #c8dff5;
+  --muted:   #1e3050;
+  --acc:     #38bfff;
   --acc2:    #f0c040;
   --MALWARE: #ff4455;
   --INITIAL: #f0c040;
   --POST_EXP:#b06aff;
-  --AI_SEC:  #3dffa0;
+  --AI_SEC:  #38bfff;
   --mono: 'JetBrains Mono', monospace;
   --sans: 'Noto Sans JP', sans-serif;
   --disp: 'Rajdhani', sans-serif;
@@ -395,7 +462,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background:linear-gradient(90deg,var(--acc),transparent)}
 .logo-name{
   font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
-  color:var(--acc);text-shadow:0 0 24px rgba(61,255,160,.35);line-height:1;
+  color:var(--acc);text-shadow:0 0 24px rgba(56,191,255,.35);line-height:1;
 }
 .logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
 .logo-log-link{
@@ -413,7 +480,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%232c4035' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:10px center;
 }
-#search-box:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(61,255,160,.08)}
+#search-box:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(56,191,255,.08)}
 #search-box::placeholder{color:var(--muted)}
 
 .filter-wrap{padding:8px 10px;border-bottom:1px solid var(--bdr);display:flex;gap:4px;flex-wrap:wrap}
@@ -423,11 +490,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;transition:.15s;
 }
 .cat-btn:hover{color:var(--hi);border-color:var(--text)}
-.cat-btn.active[data-cat="ALL"]{background:rgba(61,255,160,.1);border-color:var(--acc);color:var(--acc)}
+.cat-btn.active[data-cat="ALL"]{background:rgba(56,191,255,.1);border-color:var(--acc);color:var(--acc)}
 .cat-btn.active[data-cat="MALWARE"]{background:rgba(255,68,85,.1);border-color:var(--MALWARE);color:var(--MALWARE)}
 .cat-btn.active[data-cat="INITIAL"]{background:rgba(240,192,64,.1);border-color:var(--INITIAL);color:var(--INITIAL)}
 .cat-btn.active[data-cat="POST_EXP"]{background:rgba(176,106,255,.1);border-color:var(--POST_EXP);color:var(--POST_EXP)}
-.cat-btn.active[data-cat="AI_SEC"]{background:rgba(61,255,160,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
+.cat-btn.active[data-cat="AI_SEC"]{background:rgba(56,191,255,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
 
 .date-list{flex:1;overflow-y:auto;padding:8px}
 .date-item{
@@ -452,7 +519,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 
 .stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
 .stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 8px rgba(61,255,160,.3)}
+  text-shadow:0 0 8px rgba(56,191,255,.3)}
 
 /* ── Main feed ── */
 .main-feed{flex:1;overflow-y:auto;padding:16px}
@@ -494,7 +561,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .cat-tag[data-cat="MALWARE"]{background:rgba(255,68,85,.12);color:var(--MALWARE);border:1px solid rgba(255,68,85,.25)}
 .cat-tag[data-cat="INITIAL"]{background:rgba(240,192,64,.12);color:var(--INITIAL);border:1px solid rgba(240,192,64,.25)}
 .cat-tag[data-cat="POST_EXP"]{background:rgba(176,106,255,.12);color:var(--POST_EXP);border:1px solid rgba(176,106,255,.25)}
-.cat-tag[data-cat="AI_SEC"]{background:rgba(61,255,160,.08);color:var(--AI_SEC);border:1px solid rgba(61,255,160,.2)}
+.cat-tag[data-cat="AI_SEC"]{background:rgba(56,191,255,.08);color:var(--AI_SEC);border:1px solid rgba(56,191,255,.2)}
 .card-date{font-family:var(--mono);font-size:.6rem;color:var(--muted)}
 .cvss-badge{
   font-family:var(--mono);font-size:.58rem;font-weight:700;
@@ -503,7 +570,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .cvss-critical{background:rgba(255,68,85,.12);color:#ff4455;border:1px solid rgba(255,68,85,.3)}
 .cvss-high{background:rgba(240,192,64,.12);color:#f0c040;border:1px solid rgba(240,192,64,.3)}
 .cvss-medium{background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3)}
-.cvss-low{background:rgba(61,255,160,.08);color:#3dffa0;border:1px solid rgba(61,255,160,.2)}
+.cvss-low{background:rgba(56,191,255,.08);color:#38bfff;border:1px solid rgba(56,191,255,.2)}
 
 .card-title{
   font-family:var(--disp);font-size:1.05rem;font-weight:600;
@@ -520,8 +587,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 }
 .poc-chip{
   font-family:var(--mono);font-size:.56rem;
-  background:rgba(61,255,160,.07);color:var(--acc);
-  border:1px solid rgba(61,255,160,.18);padding:2px 6px;border-radius:2px;
+  background:rgba(56,191,255,.07);color:var(--acc);
+  border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
   animation:blink 2s infinite;
 }
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
@@ -546,7 +613,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   padding:6px 14px;border-radius:2px;cursor:pointer;
   font-family:var(--mono);font-size:.68rem;font-weight:700;transition:.15s;
 }
-.back-btn:hover{background:rgba(61,255,160,.07)}
+.back-btn:hover{background:rgba(56,191,255,.07)}
 .det-url{margin-left:auto;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none}
 .det-url:hover{color:var(--text)}
 
@@ -558,12 +625,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--bdr)}
 .poc-btn{
   display:inline-flex;align-items:center;gap:6px;
-  background:rgba(61,255,160,.08);color:var(--acc);
-  border:1px solid rgba(61,255,160,.25);
+  background:rgba(56,191,255,.08);color:var(--acc);
+  border:1px solid rgba(56,191,255,.25);
   padding:8px 16px;border-radius:3px;text-decoration:none;
   font-family:var(--mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
 }
-.poc-btn:hover{background:rgba(61,255,160,.15);box-shadow:0 0 14px rgba(61,255,160,.15)}
+.poc-btn:hover{background:rgba(56,191,255,.15);box-shadow:0 0 14px rgba(56,191,255,.15)}
 
 /* markdown */
 .det-inner h1{display:none}
@@ -577,11 +644,11 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .det-inner ul,.det-inner ol{padding-left:20px;margin-bottom:10px;line-height:1.8}
 .det-inner li{margin-bottom:4px;color:var(--text)}
 .det-inner pre{
-  background:#030d07;border:1px solid var(--bdr2);border-left:2px solid var(--acc);
+  background:#040c1a;border:1px solid var(--bdr2);border-left:2px solid var(--acc);
   border-radius:3px;padding:16px 16px 16px 18px;overflow-x:auto;margin:14px 0;position:relative;
 }
 .det-inner code{font-family:var(--mono);font-size:.78rem;color:var(--acc);line-height:1.7}
-.det-inner :not(pre)>code{background:rgba(61,255,160,.07);padding:2px 5px;border-radius:2px;font-size:.78rem;color:var(--acc2)}
+.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;font-size:.78rem;color:var(--acc2)}
 .det-inner blockquote{border-left:2px solid var(--bdr2);padding-left:12px;color:var(--muted);margin:10px 0}
 .det-inner table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.78rem}
 .det-inner th{background:var(--surf2);padding:8px 10px;text-align:left;border:1px solid var(--bdr);
@@ -614,7 +681,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
     background:linear-gradient(90deg,var(--acc),transparent 60%)}
   .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
-    color:var(--acc);letter-spacing:.1em;text-shadow:0 0 16px rgba(61,255,160,.3)}
+    color:var(--acc);letter-spacing:.1em;text-shadow:0 0 16px rgba(56,191,255,.3)}
   .mob-search-btn{background:none;border:1px solid var(--bdr2);color:var(--text);
     padding:5px 10px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.65rem}
 
@@ -670,7 +737,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 
 <!-- MOBILE HEADER -->
 <div class="mob-header">
-  <span class="mob-logo">VORTEX</span>
+  <span class="mob-logo">CIPHER</span>
   <button class="mob-search-btn" onclick="toggleMobSearch()">SEARCH</button>
 </div>
 <div class="mob-search-wrap" id="mob-search-wrap">
@@ -681,8 +748,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 <div class="layout">
   <nav class="sidebar">
     <div class="logo-wrap">
-      <div class="logo-name">VORTEX</div>
-      <div class="logo-sub">// THREAT INTELLIGENCE FEED</div>
+      <div class="logo-name">CIPHER</div>
+      <div class="logo-sub">// THREAT INTELLIGENCE</div>
       <a href="log.html" class="logo-log-link">📋 調査ログ</a>
     </div>
     <div class="search-wrap">
@@ -958,13 +1025,13 @@ def _build_log_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VORTEX // RUN LOG</title>
+<title>CIPHER // RUN LOG</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#07100d;--surf:#0c1712;--surf2:#111f18;--bdr:#1b3028;--bdr2:#274840;
-  --text:#7aaa8e;--hi:#d2edd8;--muted:#2c4035;--acc:#3dffa0;--acc2:#f0c040;
+  --bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;
+  --text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;
   --mono:'JetBrains Mono',monospace;--sans:'Noto Sans JP',sans-serif;--disp:'Rajdhani',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -979,12 +1046,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 }
 .back-link:hover{color:var(--acc);border-color:var(--acc)}
 .page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);
-  letter-spacing:.1em;text-shadow:0 0 20px rgba(61,255,160,.25)}
+  letter-spacing:.1em;text-shadow:0 0 20px rgba(56,191,255,.25)}
 .page-sub{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.15em;margin-top:4px}
 .summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
 .stat-card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:14px;text-align:center}
 .stat-card-val{font-family:var(--disp);font-size:1.6rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 10px rgba(61,255,160,.25);display:block}
+  text-shadow:0 0 10px rgba(56,191,255,.25);display:block}
 .stat-card-lbl{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.1em;margin-top:3px}
 .section-title{font-family:var(--mono);font-size:.62rem;letter-spacing:.15em;color:var(--muted);
   margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
@@ -998,8 +1065,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .log-table tr:hover td{background:var(--surf2)}
 .log-table tr.today-row td{color:var(--hi)}
 .badge-new{
-  font-family:var(--mono);font-size:.55rem;background:rgba(61,255,160,.1);
-  color:var(--acc);border:1px solid rgba(61,255,160,.2);
+  font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);
+  color:var(--acc);border:1px solid rgba(56,191,255,.2);
   padding:1px 6px;border-radius:2px;margin-left:6px;
 }
 .badge-zero{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
@@ -1013,7 +1080,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 <body>
 <div class="page">
   <div class="page-header">
-    <a href="index.html" class="back-link">← VORTEX</a>
+    <a href="index.html" class="back-link">← CIPHER</a>
     <div class="page-title">RUN LOG</div>
     <div class="page-sub">// AI調査実行履歴</div>
   </div>
