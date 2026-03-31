@@ -5,7 +5,7 @@ from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime, timedelta
 
-# API設定
+# --- SETTINGS ---
 TAVILY_KEY = os.getenv("TAVILY_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
 tavily = TavilyClient(api_key=TAVILY_KEY)
@@ -14,43 +14,32 @@ groq = Groq(api_key=GROQ_KEY)
 MASTER_DATA = "all_articles.json"
 
 def fetch_and_analyze():
-    # 実行日の前日分を対象にする（2026年3月のコンテキストを維持）
     target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    
     categories = {
-        "MALWARE": f'"{target_date}" (RAT OR malware) technical deep-dive "persistence" "evasion" TTPs',
-        "INITIAL": f'"{target_date}" (initial access OR "ClickFix" OR "phishing") delivery "POC" 2026',
-        "POST_EXP": f'"{target_date}" (Active Directory OR "post-exploitation" OR "injection") technique PoC',
-        "AI_SEC": f'"{target_date}" (Prompt Injection OR "AI Agent" OR "LLM jailbreak") attack vector 2026'
+        "MALWARE": f'"{target_date}" malware "technical analysis" (persistence OR evasion) 2026',
+        "INITIAL": f'"{target_date}" (initial access OR "ClickFix") POC "delivery" 2026',
+        "POST_EXP": f'"{target_date}" (Credential Access OR "Lateral Movement") attack PoC 2026',
+        "AI_SEC": f'"{target_date}" (Prompt Injection OR "Model Inversion") attack vector 2026'
     }
     
     new_articles = []
     for cat_id, q in categories.items():
         try:
-            search_res = tavily.search(query=q, search_depth="advanced", max_results=4)["results"]
+            search_res = tavily.search(query=q, search_depth="advanced", max_results=5)["results"]
             for item in search_res:
                 if any(x['url'] == item['url'] for x in new_articles): continue
                 
-                # 技術者による技術者のためのプロンプト
                 prompt = f"""
-                あなたはOSCP/CRTO/GCFAを保有し、妥協を許さないシニア・レッドチーム・リサーチャーです。
-                以下のソースを「実戦で即座に使用可能な攻撃モジュール」として再構成してください。
-                【制約】2026年3月の最新情報でない、または具体的コマンドやAPI/レジストリ等の技術詳細が皆無な場合は「SKIP」と出力せよ。
+                あなたはOSCP/CRTO保有のレッドチーム・リードです。
+                ソースを解析し、以下の項目に従って「武器化」してください。
+                技術詳細がない場合は「SKIP」と出力せよ。
 
-                【出力必須項目（HTML形式）】
-                1. **Title**: [CVE番号/通称] ターゲットOS/アプリ -> 攻撃の核心メカニズム (30文字以内)
-                2. <h3>[0] Prerequisites</h3> (OSビルド、パッチレベル、必要権限、依存ツールを表で)
-                3. <h3>[1] Strategic Advantage</h3> (なぜ既存のEDR/AVを回避できるのか、既存手法との決定的な違いを1行で)
-                4. <h3>[2] Attack Execution (The Kill Chain)</h3> 
-                   - 変数定義(`export TARGET=...`)を含む、ターミナルにコピペして実行可能なコマンドシーケンス。
-                   - ペイロードの構造（どのバイトをどう書き換えるか、どのAPIを叩くか）の詳述。
-                5. <h3>[3] Technical Deep-Dive</h3> 
-                   - 悪用するWindows API/Linux System Call、書き換えるレジストリパス/構成ファイル。
-                6. <h3>[4] IoC & Detection Hunter</h3>
-                   - SHA256, IP, Domain, Mutex, Registry Path。
-                   - SIEMで検知するための具体的なクエリ条件。
-
-                【禁止】「ソースを参照」「適切な対策」等の一般論は一切不要。具体的数値とコードのみを出力せよ。
+                1. **Weapon_ID**: [CVE/通称] Target -> Method
+                2. **Tactical_Flow**: 攻撃ステップのASCII ART。
+                3. **Target_Requirements**: 必要環境（OS、権限等）の表。
+                4. **Exploit_Payload**: `export TARGET=...` から始まる実戦コマンド群。
+                5. **Detection_Evasion**: 回避ロジックの詳述。
+                6. **Detection_Rule**: 検知用クエリ。
 
                 URL: {item['url']}
                 Content: {item['content'][:9000]}
@@ -62,21 +51,17 @@ def fetch_and_analyze():
                     temperature=0.0
                 )
                 res_text = response.choices[0].message.content
-                if "SKIP" in res_text[:10] or len(res_text) < 700: continue
+                if "SKIP" in res_text[:10]: continue
 
-                # メタデータ抽出
                 attack_id = re.search(r'T\d{4}(?:\.\d{3})?', res_text)
-                tags = re.findall(r'#(\w+)', res_text)
-                title_match = re.search(r'Title\*\*: (.*)', res_text)
-                title = title_match.group(1).strip() if title_match else f"[{cat_id}] Raw Intelligence"
-
+                title = re.search(r'Weapon_ID\*\*: (.*)', res_text)
+                
                 new_articles.append({
                     "date": target_date,
                     "category": cat_id,
-                    "title": title,
+                    "title": title.group(1).strip() if title else "RAW_INTEL",
                     "attack_id": attack_id.group(0) if attack_id else "N/A",
-                    "tags": list(set(tags)) if tags else [cat_id, "2026_Exploit"],
-                    "content": res_text.split("1. **Title**")[1] if "1. **Title**" in res_text else res_text,
+                    "content": res_text,
                     "url": item['url']
                 })
         except Exception as e: print(f"Error: {e}")
@@ -85,8 +70,7 @@ def fetch_and_analyze():
 def update_db_and_ui(new_entries):
     db = []
     if os.path.exists(MASTER_DATA):
-        with open(MASTER_DATA, "r", encoding="utf-8") as f:
-            db = json.load(f)
+        with open(MASTER_DATA, "r", encoding="utf-8") as f: db = json.load(f)
     
     existing_urls = {a['url'] for a in db}
     for entry in new_entries:
@@ -95,120 +79,128 @@ def update_db_and_ui(new_entries):
     with open(MASTER_DATA, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
     
-    json_payload = json.dumps(db)
-    
+    # --- モバイル最適化 UI (Swipeable & Responsive) ---
     html_content = f"""
     <!DOCTYPE html>
     <html lang="ja">
     <head>
         <meta charset="UTF-8">
-        <title>RT-INTEL: WEAPONIZED DATABASE</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>RT-TACTICAL | MOBILE</title>
         <style>
-            :root {{ --bg: #0a0c10; --side: #010409; --card: #161b22; --text: #d1d7dd; --accent: #f85149; --border: #30363d; --code: #000; --green: #7ee787; }}
-            body {{ margin: 0; display: flex; font-family: 'Consolas', 'Monaco', monospace; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }}
+            :root {{ --bg: #05070a; --card: #0d1117; --accent: #f85149; --text: #c9d1d9; --border: #30363d; --green: #7ee787; }}
+            body {{ margin:0; font-family:'Consolas', monospace; background:var(--bg); color:var(--text); overflow-x:hidden; -webkit-tap-highlight-color: transparent; }}
             
-            #sidebar {{ width: 160px; background: var(--side); border-right: 1px solid var(--border); overflow-y: auto; padding: 15px; flex-shrink: 0; }}
-            #sidebar h2 {{ font-size: 0.7rem; color: #8b949e; letter-spacing: 2px; text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 10px; }}
+            /* ヘッダー固定 */
+            header {{ position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); padding:15px; z-index:100; }}
+            #search-box {{ width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; /* iOSズーム防止 */ }}
             
-            main {{ flex-grow: 1; overflow-y: auto; padding: 30px; position: relative; }}
-            .search-bar {{ position: sticky; top: -30px; background: var(--bg); padding: 10px 0 25px; z-index: 100; }}
-            #search-box {{ width: 100%; padding: 15px; background: #000; border: 1px solid var(--accent); color: var(--green); border-radius: 4px; font-family: inherit; }}
+            /* 記事リスト */
+            main {{ padding:15px; padding-bottom:80px; }}
+            .article-card {{ background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; transition:0.2s; cursor:pointer; }}
+            .article-card:active {{ transform: scale(0.98); background:#161b22; }}
+            .meta {{ font-size:0.7rem; color:#8b949e; margin-bottom:8px; display:flex; justify-content:space-between; }}
+            .attack-id {{ color:var(--accent); font-weight:bold; }}
+
+            /* モバイル詳細ドロワー */
+            #detail-view {{ position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index:1000; overflow-y:auto; display:flex; flex-direction:column; }}
+            #detail-view.open {{ transform: translateX(-100%); }}
             
-            .article-card {{ background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 18px; margin-bottom: 12px; cursor: pointer; border-left: 4px solid var(--border); }}
-            .article-card:hover {{ border-color: var(--accent); background: #1c2128; }}
-            .meta {{ font-size: 0.7rem; color: #8b949e; margin-bottom: 8px; display: flex; gap: 15px; }}
-            .att-id {{ color: var(--accent); font-weight: bold; }}
+            .detail-header {{ position:sticky; top:0; background:var(--card); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; }}
+            .back-btn {{ font-size:1.5rem; background:none; border:none; color:var(--accent); cursor:pointer; margin-right:15px; }}
             
-            #detail-view {{ position: fixed; top: 0; right: -100%; width: 75%; height: 100%; background: #0d1117; border-left: 2px solid var(--accent); transition: 0.3s; z-index: 1000; padding: 40px; overflow-y: auto; box-shadow: -20px 0 60px rgba(0,0,0,0.8); }}
-            #detail-view.open {{ right: 0; }}
-            .close-btn {{ background: var(--accent); color: #fff; border: 0; padding: 8px 20px; cursor: pointer; font-weight: bold; margin-bottom: 30px; }}
+            .detail-content {{ padding:20px; line-height:1.6; }}
+            h3 {{ font-size:0.9rem; color:var(--accent); text-transform:uppercase; border-left:3px solid var(--accent); padding-left:10px; margin:25px 0 15px; }}
+            pre {{ background:#000; padding:15px; border-radius:8px; border:1px solid #333; overflow-x:auto; font-size:0.8rem; position:relative; }}
+            code {{ color:var(--green); }}
             
-            h3 {{ color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 5px; font-size: 1.1rem; margin-top: 2em; }}
-            pre {{ background: var(--code); padding: 20px; border-radius: 4px; border: 1px solid #333; overflow-x: auto; position: relative; }}
-            code {{ color: var(--green); font-family: 'Fira Code', monospace; line-height: 1.5; }}
-            .copy-btn {{ position: absolute; top: 10px; right: 10px; padding: 5px 10px; background: #333; color: #fff; border: 0; cursor: pointer; border-radius: 3px; font-size: 0.7rem; }}
-            .copy-btn:hover {{ background: var(--accent); }}
+            .copy-btn {{ position:absolute; top:8px; right:8px; background:#21262d; color:#fff; border:0; padding:5px 10px; border-radius:4px; font-size:0.6rem; }}
             
-            .tag {{ color: #58a6ff; font-size: 0.7rem; margin-right: 8px; }}
-            table {{ width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.85rem; }}
-            th, td {{ border: 1px solid var(--border); padding: 10px; text-align: left; }}
-            th {{ background: #161b22; }}
+            table {{ width:100%; border-collapse:collapse; font-size:0.75rem; margin:15px 0; }}
+            th, td {{ border:1px solid var(--border); padding:8px; text-align:left; }}
+            
+            /* タブ切り替え（PC向けスプリット用） */
+            @media (min-width: 768px) {{
+                #detail-view {{ flex-direction:row; }}
+                .detail-pane {{ width:50%; height:100%; overflow-y:auto; border-right:1px solid var(--border); }}
+            }}
         </style>
     </head>
     <body>
-        <nav id="sidebar">
-            <h2>RT-WEAPONS</h2>
-            <div id="nav-list"></div>
-        </nav>
-        <main>
-            <div class="search-bar">
-                <input type="text" id="search-box" placeholder="grep -i [keyword] articles.db...">
-            </div>
-            <div id="article-list"></div>
-        </main>
+        <header>
+            <input type="text" id="search-box" placeholder="Search Weapons...">
+        </header>
+        <main id="article-list"></main>
+
         <div id="detail-view">
-            <button class="close-btn" onclick="closeDetail()">EXIT_VIEW</button>
-            <div id="detail-content"></div>
+            <div class="detail-header">
+                <button class="back-btn" onclick="closeDetail()">←</button>
+                <div id="header-title" style="font-size:0.9rem; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+            </div>
+            <div class="detail-content" id="detail-body"></div>
         </div>
 
         <script>
-            const articles = {json_payload};
-            function render() {{
-                const query = document.getElementById('search-box').value.toLowerCase();
-                const list = document.getElementById('article-list');
-                const nav = document.getElementById('nav-list');
-                list.innerHTML = ''; nav.innerHTML = '';
+            const db = {json_payload};
+            let startX = 0;
 
-                articles.filter(a => (a.title + a.content).toLowerCase().includes(query)).reverse().forEach(a => {{
+            function render() {{
+                const q = document.getElementById('search-box').value.toLowerCase();
+                const list = document.getElementById('article-list');
+                list.innerHTML = '';
+
+                db.filter(a => (a.title + a.content).toLowerCase().includes(q)).reverse().forEach(a => {{
                     const card = document.createElement('div');
                     card.className = 'article-card';
-                    card.style.borderLeftColor = getCatColor(a.category);
                     card.innerHTML = `
                         <div class="meta">
-                            <span>[${{a.date}}]</span>
-                            <span class="att-id">${{a.attack_id}}</span>
-                            <span>${{a.category}}</span>
+                            <span>${{a.date}}</span>
+                            <span class="attack-id">${{a.attack_id}}</span>
                         </div>
-                        <div style="font-weight:bold; font-size:1rem; color:#fff;">${{a.title}}</div>
+                        <div style="font-weight:bold; font-size:1.1rem; color:#fff;">${{a.title}}</div>
                     `;
                     card.onclick = () => openDetail(a);
                     list.appendChild(card);
-                    
-                    const n = document.createElement('div');
-                    n.style.cssText = "font-size:0.6rem; padding:8px; border-bottom:1px solid #21262d; cursor:pointer; color:#8b949e";
-                    n.innerText = "> " + a.title.substring(0, 20);
-                    n.onclick = () => openDetail(a);
-                    nav.appendChild(n);
                 }});
-            }}
-
-            function getCatColor(cat) {{
-                return {{ MALWARE:'#f85149', INITIAL:'#1f6feb', POST_EXP:'#8957e5', AI_SEC:'#238636' }}[cat] || '#ccc';
             }}
 
             function openDetail(a) {{
-                const content = document.getElementById('detail-content');
-                content.innerHTML = `
-                    <div style="font-size:0.8rem; color:var(--accent); font-weight:bold;"># MISSION_DETAILS: ${{a.category}}</div>
-                    <h1 style="margin:10px 0; font-size:1.8rem; border:0; color:#fff;">${{a.title}}</h1>
-                    <div style="margin-bottom:20px;">${{a.tags.map(t => '<span class="tag">#'+t+'</span>').join('')}}</div>
-                    <div class="body">${{a.content}}</div>
-                    <div style="margin-top:50px; font-size:0.7rem; opacity:0.3;">SRC: ${{a.url}}</div>
+                const view = document.getElementById('detail-view');
+                document.getElementById('header-title').innerText = a.title;
+                document.getElementById('detail-body').innerHTML = `
+                    <div style="font-size:0.7rem; color:#8b949e; margin-bottom:20px;">CATEGORY: ${{a.category}} | ID: ${{a.attack_id}}</div>
+                    ${{a.content}}
+                    <div style="margin-top:40px; font-size:0.7rem; opacity:0.3;">SRC: ${{a.url}}</div>
                 `;
-                content.querySelectorAll('pre').forEach(block => {{
-                    const btn = document.createElement('button');
-                    btn.className = 'copy-btn'; btn.innerText = 'COPY';
-                    btn.onclick = () => {{
-                        const raw = block.innerText.replace('COPY', '');
-                        navigator.clipboard.writeText(raw);
-                        btn.innerText = 'DONE'; setTimeout(() => btn.innerText='COPY', 2000);
+                
+                document.querySelectorAll('pre').forEach(p => {{
+                    const b = document.createElement('button');
+                    b.className = 'copy-btn'; b.innerText = 'COPY';
+                    b.onclick = (e) => {{
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(p.innerText.replace('COPY',''));
+                        b.innerText = 'DONE'; setTimeout(()=>b.innerText='COPY', 1500);
                     }};
-                    block.appendChild(btn);
+                    p.appendChild(b);
                 }});
-                document.getElementById('detail-view').classList.add('open');
+                
+                view.classList.add('open');
+                window.history.pushState({{details:true}}, ""); // ブラウザの戻るボタン対応
             }}
-            function closeDetail() {{ document.getElementById('detail-view').classList.remove('open'); }}
-            document.getElementById('search-box').addEventListener('input', render);
+
+            function closeDetail() {{ 
+                document.getElementById('detail-view').classList.remove('open');
+            }}
+
+            // スワイプで閉じる処理
+            document.getElementById('detail-view').addEventListener('touchstart', e => startX = e.touches[0].clientX);
+            document.getElementById('detail-view').addEventListener('touchend', e => {{
+                let endX = e.changedTouches[0].clientX;
+                if (endX - startX > 100) closeDetail(); // 右スワイプで閉じる
+            }});
+
+            window.onpopstate = closeDetail;
+            document.getElementById('search-box').oninput = render;
             render();
         </script>
     </body>
