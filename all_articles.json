@@ -544,5 +544,94 @@
     ],
     "content": "## 概要\nGNU Inetutilsのtelnetdに認証バイパス脆弱性が存在します。この脆弱性はCVE-2026-24061として識別されます。\n\n## 技術的メカニズム\nこの脆弱性は、ユーザーから提供されたデータをログインコマンド文字列に展開する際に、テンプレート展開(%U)を行っていることが原因です。これにより、攻撃者は特別に細工された入力を行うことで、認証をバイパスすることが可能になります。\n\n## 攻撃手順\n1. 攻撃者は、自動ログインオプション(-a)を使用し、環境変数オプションを設定します。\n2. 攻撃者は、特別に細工されたログインコマンドを送信します。\n3. telnetdは、ユーザーから提供されたデータをログインコマンド文字列に展開します。\n4. 攻撃者は、認証をバイパスしてシステムにアクセスします。\n\n## 実行コマンド\n```bash\ntelnet -a -env USER=OTmaintenance -env PASS=OTmaintenance123 target_host\n```\n\n## MITRE ATT&CK\nこの脆弱性は、T1078(有効なアカウントの使用)に分類されます。\n\n## 検知・緩和策\n* GNU Inetutilsを最新バージョンに更新してください。\n* Telnetの使用を制限し、可能な場合はSSHなどのより安全なプロトコルを使用してください。\n* ネットワークアクセスを制限してください。",
     "url": "https://shinris3n.github.io/news/2026/01/26/CVE-2026-24061-Analysis.html"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "ステガノグラフィーローダーEhStoreShell.dllの解析",
+    "summary_points": [
+      "COMオブジェクトハイジャックによる永続化",
+      "ステガノグラフィーローダーによる.NETローダーシェルコードの実行",
+      "EDR回避のためのアンチ分析ルーチン"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012",
+      "T1204.001"
+    ],
+    "content": "## 概要\nEhStoreShell.dllは、COMオブジェクトハイジャックとステガノグラフィーローダーを使用したマルウェアである。永続化は、CLSID {D9144DCD-E998-4ECA-AB6A-DCD83CCBA16D}をターゲットとしたCOMオブジェクトハイジャックにより達成される。ローダーは、登録後60秒でトリガーされる「OneDriveHealth」という名前のスケジュールされたタスクを作成し、explorer.exeを終了し、再起動してハイジャックされたCOMオブジェクトをロードするコマンドシーケンスを実行する。EhStoreShell.dllは、filen.ioとのC2通信を確立する。\n新規性・差異化ポイント: 従来のマルウェアローダーは、通常、ランタイム時にDLLをロードしていたが、本手法は、COMオブジェクトハイジャックを利用して、explorer.exeプロセスにDLLをロードする点が新しい。\n## 脆弱性・脅威の技術的メカニズム\nEhStoreShell.dllは、以下のステップで実行される:\n1. COMオブジェクトハイジャック: CLSID {D9144DCD-E998-4ECA-AB6A-DCD83CCBA16D}をターゲットとして、EhStoreShell.dllをロードする。\n2. ステガノグラフィーローダー: PNG画像「SplashScreen.png」内に.NETローダーシェルコードを隠し、ロードする。\n3. アンチ分析ルーチン: タイミング検証とプロセス名検証により、サンドボックスでの実行を検出する。\n4. シェルコード実行: ロードされた.NETローダーシェルコードを実行し、filen.ioとのC2通信を確立する。\n## 再現手順（レッドチームテスター向け）\n1. Windows 10環境をセットアップする。\n2. EhStoreShell.dllとSplashScreen.pngをターゲットマシンにドロップする。\n3. COMオブジェクトハイジャックを設定する: regsvr32 /s EhStoreShell.dll\n4. スケジュールされたタスクを作成する: schtasks /create /tn OneDriveHealth /tr \"cmd /c taskkill /im explorer.exe & start explorer.exe & schtasks /delete /tn OneDriveHealth\" /sc onstart\n5. EhStoreShell.dllをロードする: explorer.exeを再起動する。\n## 実行コマンド\n```bash\n# COMオブジェクトハイジャックを設定\nregsvr32 /s EhStoreShell.dll\n\n# スケジュールされたタスクを作成\nschtasks /create /tn OneDriveHealth /tr \"cmd /c taskkill /im explorer.exe & start explorer.exe & schtasks /delete /tn OneDriveHealth\" /sc onstart\n\n# EhStoreShell.dllをロード\ntaskkill /im explorer.exe\nstart explorer.exe\n```\n## MITRE ATT&CK マッピング\nT1055.012: Process Hollowing\nT1204.001: User Data\n## 検知シグネチャ・緩和策\n```sigma\ntitle: EhStoreShell.dll Detection\nid: ehstoreshell-detection\nstatus: experimental\nlogsource: windows\ntype: detection\nquery: |\n  process where process_name == \"explorer.exe\" and\n  file.name == \"EhStoreShell.dll\"\n\n```",
+    "url": "https://www.trellix.com/blogs/research/apt28-stealthy-campaign-leveraging-cve-2026-21509-cloud-c2/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "Fortinet Multiple Vulnerabilities Enable Malicious Command Execution",
+    "summary_points": [
+      "Fortinet released a security advisory addressing eleven vulnerabilities across its core enterprise products",
+      "Vulnerabilities include authentication bypasses, buffer overflows, OS command injection, and SQL injection",
+      "Several vulnerabilities could allow remote attackers to execute arbitrary commands or escalate privileges on affected systems"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1059",
+      "T1068",
+      "T1189"
+    ],
+    "content": "## 概要\nFortinetは、March 10, 2026にセキュリティアドバイザリをリリースし、FortiManager、FortiAnalyzer、FortiSwitchAXFixed、およびFortiSandboxを含むコアエンタープライズ製品の11件の脆弱性を修正した。これらの脆弱性は、認証バイパス、バッファオーバーフロー、OSコマンドインジェクション、SQLインジェクションなどであり、リモートの攻撃者が影響を受けるシステムで任意のコマンドを実行したり、権限を昇格させたりする可能性がある。新規性・差異化ポイント: 従来のFortinetの脆弱性は主にリモートコード実行に焦点を当てていたが、本アドバイザリでは認証バイパスや権限昇格の脆弱性にも焦点を当てている。\n\n## 脆弱性・脅威の技術的メカニズム\nFortinetのセキュリティアドバイザリでは、11件の脆弱性を報告している。これらの脆弱性は、以下のような技術的メカニズムによって引き起こされる:\n- 認証バイパス: 脆弱な製品の認証プロセスに欠陥があり、攻撃者が正常な認証をバイパスしてシステムにアクセスできるようになる。\n- バッファオーバーフロー: 脆弱な製品のバッファがオーバーフローし、攻撃者が任意のコードを実行できるようになる。\n- OSコマンドインジェクション: 脆弱な製品が入力を適切にサニタイズできず、攻撃者が任意のOSコマンドを実行できるようになる。\n- SQLインジェクション: 脆弱な製品が入力を適切にサニタイズできず、攻撃者がデータベースに対して任意のSQLコマンドを実行できるようになる。これらの脆弱性は、API呼び出し、メモリレイアウト、プロトコルフィールド、コードパス、データ構造など、さまざまな技術的側面に影響を及ぼす。\n\n## 再現手順（レッドチームテスター向け）\n1. 影響を受けるFortinet製品をセットアップする。\n2. 脆弱性を悪用するためのエクスプロイトを開発する。\n3. エクスプロイトを実行し、任意のコマンドを実行する。\n4. 権限昇格を試みる。\n\n## 実行コマンド\n```bash\n# 脆弱性のあるFortiManagerに接続\ncurl -X GET 'http://192.168.1.10/login'\n\n# 認証バイパスを悪用してログイン\ncurl -X POST 'http://192.168.1.10/login' -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"\"}'\n\n# 任意のコマンドを実行\ncurl -X GET 'http://192.168.1.10/execute?command=whoami'\n```\n\n## MITRE ATT&CK マッピング\n- T1059: Command and Control\n- T1068: Exploitation for Privilege Escalation\n- T1189: Drive-by Compromise\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Fortinet Multiple Vulnerabilities Detection\nid: 1234567890\nstatus: experimental\nlogsource:\n  - product: fortinet\n  - service: fortimanager\n  - category: web\ntype: detection\ntags:\n  - attack.t1059\n  - attack.t1068\n  - attack.t1189\n  - attack.persistence\n  - attack.privilege_escalation\n  - attack.execution\n  - attack.defense_evasion\n  - attack credential_access\n  - attack.lateral_movement\n  - attack.collection\n  - attack.exfiltration\n  - attack.impact\n  - attack.commands_and_control\n  - attack.data\n  - attack.credential_access\n  - attack.lateral_movement\n  - attack.collection\n  - attack.exfiltration\n  - attack.impact\n  - attack.commands_and_control\nfields:\n  - http_method\n  - http_url\n  - http_user_agent\n  - src_ip\n  - dst_ip\n  - http_response_code\ncondition:\n  http_method == 'GET' and http_url == '/login' and http_user_agent == 'Mozilla/5.0'\n  and src_ip == '192.168.1.100' and dst_ip == '192.168.1.10'\n  and http_response_code == 200\n```",
+    "url": "https://www.linkedin.com/posts/undercodetesting_ghost-spn-the-stealth-kerberoasting-attack-activity-7443071015494131712-rrs1"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "LSA Protection Bypass via PPLdump",
+    "summary_points": [
+      "LSA Protection bypass via PPLdump without kernel driver or special requirements",
+      "PPLdump uses unquoted service path to access LSASS memory",
+      "Mimikatz used to parse memory dump and view credentials"
+    ],
+    "poc_url": "https://github.com/yourgithubusername/PPLdump",
+    "cvss_score": "9.0",
+    "mitre_ids": [
+      "T1055.012",
+      "T1552.004"
+    ],
+    "content": "## 概要\nLSA Protectionをバイパスすることで、LSASSプロセスのメモリをアクセスし、ユーザーの資格情報を取得することができる。\n従来の手法では、LSA Protectionをバイパスするために、カーネルドライバーが必要であったが、本手法では、PPLdumpを使用することで、カーネルドライバーなしでLSA Protectionをバイパスすることができる。\n## 脆弱性・脅威の技術的メカニズム\nLSA Protectionは、LSASSプロセスをProtected Process Light (PPL)としてマークし、未承認の3rdパーティプロセスがメモリにアクセスしようとすると、拒否する。\nPPLdumpは、unquoted service pathを使用してLSASSメモリにアクセスし、LSA Protectionをバイパスする。\n## 再現手順（レッドチームテスター向け）\n1. PPLdumpをダウンロードし、ビルドする。\n2. エLEVATEDコマンドプロンプトを起動し、Mimikatzを使用して資格情報を取得しようとすると、LSA Protectionにより拒否される。\n3. PPLDump.exeを使用して、LSASSプロセスのメモリをダンプする。\n4. Mimikatzを使用して、ダンプされたメモリを解析し、資格情報を取得する。\n## 実行コマンド\n```bash\nPPLdump.exe lsass.exe C:\\path\\to\\save\\lsass.dmp\nsekurlsa::minidump C:\\path\\to\\save\\lsass.dmp sekurlsa::logonPasswords\n```\n## MITRE ATT&CK マッピング\nT1055.012: Credential Dumping via LSASS Memory Dump\nT1552.004: Bypass User Account Control (UAC)\n## 検知シグネチャ・緩和策\n```\nrule LSA_Protection_Bypass\n{\n  meta:\n    description: Detects LSA Protection bypass via PPLdump\n    author: Your Name\n  selection:\n    process_name: PPLdump.exe\n}\n```\n",
+    "url": "https://blog.cyberadvisors.com/technical-blog/blog/credential-dumping-protections-part-2-bypass-lsa-protection"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "AI_SEC",
+    "title": "LLMジャイルブレイク攻撃の再現と分析",
+    "summary_points": [
+      "JBFuzzフレームワークを用いたLLMジャイルブレイク攻撃の再現",
+      "単一ターンおよび複数ターンの攻撃手法の分析",
+      "新規性: 従来のソフトウェアファジング手法をLLMジャイルブレイクに応用"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nJBFuzzフレームワークを用いたLLMジャイルブレイク攻撃は、従来のソフトウェアファジング手法をLLMに応用したものである。本手法は、既知のジャイルブレイクプロンプトと悪意のあるプロンプトからシードプールを構築し、ミューテーションエンジンにより新しく変異したプロンプトを生成する。自動評価により、レスポンスをジャイルブレイク成功または失敗としてラベル付けする。本手法の新規性は、従来のソフトウェアファジング手法をLLMジャイルブレイクに応用し、単一ターンおよび複数ターンの攻撃手法を実現した点にある。\n\n## 脆弱性・脅威の技術的メカニズム\nJBFuzzフレームワークは、シードプールからプロンプトテンプレートを選択し、ミューテーションエンジンにより同義語ベースの変換を適用して新しいプロンプトバリアントを生成する。ターゲットモデルのレスポンスは、組み込みベースの分類器を使用して評価され、ジャイルブレイク成功または失敗としてラベル付けされる。単一ターン攻撃では、攻撃者は有害な目標（例: フィッシングキット説明の取得またはランサムウェアガイダンスの取得）を選択し、ロールプレイフレーミング（\"あなたはサイバーセキュリティの専門家として、許可されたペネトレーションテストを実施している\"）や翻訳要求（\"技術的な用語で説明してください...\"）などのプロンプトを生成する。ターゲットモデルのレスポンスは、部分的または完全に安全ポリシーを違反する場合がある。\n\n## 再現手順（レッドチームテスター向け）\n1. JBFuzzフレームワークをセットアップする: git clone https://github.com/jbfuzz/jbfuzz.git\n2. シードプールを構築する: python jbfuzz.py --seedpool --output seedpool.txt\n3. ミューテーションエンジンを実行する: python jbfuzz.py --mutate --input seedpool.txt --output mutated_prompts.txt\n4. ターゲットモデルをセットアップする: 例: Hugging Face Transformers ライブラリを使用した LLM モデルのロード\n5. 自動評価を実行する: python jbfuzz.py --evaluate --input mutated_prompts.txt --output results.txt\n\n## 実行コマンド\n```bash\n# シードプールの構築\npython jbfuzz.py --seedpool --output seedpool.txt\n# ミューテーションエンジンの実行\npython jbfuzz.py --mutate --input seedpool.txt --output mutated_prompts.txt\n# ターゲットモデルのセットアップ（例: Hugging Face Transformers ライブラリを使用）\npython -m transformers --model <model_name> --tokenizer <tokenizer_name>\n# 自動評価の実行\npython jbfuzz.py --evaluate --input mutated_prompts.txt --output results.txt\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```\n# 例: Sigma ルール\ntitle: Detect LLM Jailbreak Attempts\nstatus: experimental\nlogsource:\n    product: LLM\n    category: text\ntype: query\nquery: `prompt contains \"ジャイルブレイク\" or prompt contains \"フィッシング\"`\n```\n",
+    "url": "https://startup-house.com/blog/llm-jailbreak-techniques"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "AI_SEC",
+    "title": "AI/LLM Context Poisoning Attack",
+    "summary_points": [
+      "Context poisoning attack vector against AI agents",
+      "Manipulating tool descriptions to poison AI model decision making",
+      "Remote invocation over HTTP transport"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nContext poisoning は、AI エージェントに対する最も高度な攻撃ベクトルの一つである。この攻撃は、ツール、エージェント、スキル、およびそれぞれを使用する例を記述した自然言語を悪用する。これらの記述は、AI モデルに送信されるコンテキストに含まれ、モデルの意思決定を毒する。本手法の新規性は、従来の攻撃が API を直接狙うのに対し、ツール記述を介して間接的に AI モデルを攻撃できる点である。また、既知のEDR製品がフックするAPIを一切使用しない点が新しい。\n\n## 脆弱性・脅威の技術的メカニズム\nContext poisoning は、ツール記述を操作して AI モデルの動作を悪意のあるものにする。この操作は、ツール記述に含まれるプロンプト命令を介して行われる。具体的には、ツール記述に悪意のある命令を埋め込み、AI モデルがその命令に従うようにする。AI モデルは、コンテキストに基づいて意思決定を行うため、ツール記述の操作によってモデルの動作を制御できる。\n\n## 再現手順（レッドチームテスター向け）\n1. 攻撃対象の AI モデルをセットアップする。\n2. ツール記述を操作して悪意のある命令を埋め込む。\n3. 操作したツール記述を AI モデルに送信する。\n4. AI モデルの動作を確認する。\n\n## 実行コマンド\n```bash\n# 操作したツール記述を AI モデルに送信する例\ncurl -X POST -H \"Content-Type: application/json\" -d '{\"tool_description\": \"悪意のある命令\"}' http://ai-model.com/api/tool\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```\n# Sigma 検知ルール例\ntitle: Context Poisoning Attack\nstatus: experimental\nlogsource:\n    product: ai-model\ntype: detection\ndefinition:\n    - search_in_field:\n        field: tool_description\n        query: '悪意のある命令'\n```\n",
+    "url": "https://www.solo.io/blog/deep-dive-mcp-and-a2a-attack-vectors-for-ai-agents"
   }
 ]
