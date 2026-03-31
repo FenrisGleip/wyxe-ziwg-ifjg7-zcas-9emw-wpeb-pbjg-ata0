@@ -2,7 +2,6 @@ import os
 import json
 import re
 import time
-import base64
 from tavily import TavilyClient
 from groq import Groq
 from datetime import datetime, timedelta
@@ -16,44 +15,44 @@ groq = Groq(api_key=GROQ_KEY)
 MASTER_DATA = "all_articles.json"
 
 def fetch_and_analyze():
-    # 検索クエリの強化（PoCを明示的に探す）
+    print("情報収集を開始します...")
+    # 検索クエリをより確実にヒットするよう調整
     categories = {
-        "MALWARE": "latest malware technical analysis persistence PoC 2026",
-        "INITIAL": "new exploit POC initial access bypass vulnerability 2026",
-        "POST_EXP": "Active Directory lateral movement impacket bloodhound technique 2026",
-        "AI_SEC": "LLM prompt injection jailbreak PoC exploit 2026"
+        "MALWARE": "malware technical analysis persistence 2026",
+        "INITIAL": "exploit POC initial access bypass vulnerability 2026",
+        "POST_EXP": "Active Directory lateral movement attack tool 2026",
+        "AI_SEC": "LLM prompt injection jailbreak exploit 2026"
     }
     
     new_articles = []
     for cat_id, q in categories.items():
+        print(f"Searching {cat_id}...")
         try:
+            # 過去1日(day)の最新かつ高度な情報を取得
             search_res = tavily.search(query=q, search_depth="advanced", max_results=3, search_period="day")["results"]
-            if not search_res: continue
-
+            
             for item in search_res:
                 if any(x['url'] == item['url'] for x in new_articles): continue
                 
+                print(f"Analyzing: {item['url'][:50]}...")
                 prompt = f"""
-                あなたは高度なサイバー攻撃を研究するレッドチーム・アナリストです。
-                以下のソースから情報を抽出し、技術者が即座に検証・再現できるレベルのレポートを作成してください。
+                あなたはシニア・レッドチーム・アナリストです。以下の情報を分析し、実戦的な技術レポートを作成してください。
 
-                【出力ルール】
-                1. タイトルは「～がどうなった」という指示文をそのまま書かず、新聞の見出しとして完結させること。
-                   (悪い例：Windowsの脆弱性を突き特権昇格がどうなった)
-                   (良い例：Windows印刷スプーラーに零日脆弱性、DLLインジェクションによる特権昇格が可能)
-                2. 攻撃手順は抽象化せず、具体的なステップ(1, 2, 3...)で記述すること。
-                3. 実行コマンドは、ツール名、引数、想定されるペイロードをOSCPレベルで具体的に書くこと。
-                4. ソース内にGitHubやPoCのURLがある場合、必ず "poc_url" フィールドに抽出すること。
-                5. 出力は必ず以下のJSON形式で行うこと。
+                【指示事項】
+                1. タイトルは「～がどうなった」等の指示的な言い回しを避け、客観的な新聞の見出し（日本語）にすること。
+                2. 攻撃手順は抽象化を排除し、攻撃者が行う具体的ステップを記述すること。
+                3. 実行コマンドは、curl, impacket, msfvenom, powershell等の実際のツール名と具体的パラメータを含むこと。
+                4. ソース内にGitHubのPoCやExploitコードのURLがある場合、必ず "poc_url" フィールドに抽出すること。
+                5. 出力は必ず以下のJSON形式で行い、他の解説文は一切含めないこと。
 
                 {{
-                  "title": "具体的かつ自然な日本語見出し",
-                  "summary": "3行の核心要約",
-                  "poc_url": "ソース内のPoCリンク（なければ空）",
-                  "report": "## 概要\\n... ## 再現手順(具体的)\\n... ## 実行コマンド\\n... ## 検知/回避"
+                  "title": "具体的かつ自然な日本語ニュース見出し",
+                  "summary": "技術的要点のみを絞った3行要約",
+                  "poc_url": "抽出したPoCリンク（なければ空文字列）",
+                  "report": "## 概要\\n... ## 具体的な再現手順\\n... ## 実行コマンド(OSCP準拠)\\n... ## 影響範囲・検知ルール"
                 }}
 
-                ソース: {item['content'][:6000]}
+                ソース: {item['content'][:8000]}
                 """
                 
                 try:
@@ -65,7 +64,7 @@ def fetch_and_analyze():
                     )
                     res_json = json.loads(response.choices[0].message.content)
                     
-                    if not res_json.get("title") or len(res_json.get("report", "")) < 300: continue
+                    if not res_json.get("title") or len(res_json.get("report", "")) < 200: continue
 
                     new_articles.append({
                         "date": datetime.now().strftime("%Y-%m-%d"),
@@ -76,9 +75,12 @@ def fetch_and_analyze():
                         "content": res_json["report"],
                         "url": item['url']
                     })
-                    time.sleep(1)
-                except: continue
-        except: continue
+                except Exception as e:
+                    print(f"Groq分析エラー: {e}")
+                    continue
+        except Exception as e:
+            print(f"Tavily検索エラー: {e}")
+            
     return new_articles
 
 def update_db_and_ui(new_entries):
@@ -96,8 +98,8 @@ def update_db_and_ui(new_entries):
     with open(MASTER_DATA, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
     
-    db_json = json.dumps(db, ensure_ascii=False)
-    db_base64 = base64.b64encode(db_json.encode('utf-8')).decode('utf-8')
+    # データをJS変数として直接埋め込む（Base64のトラブルを回避）
+    db_json_str = json.dumps(db, ensure_ascii=False)
 
     html_template = r'''
 <!DOCTYPE html>
@@ -105,96 +107,101 @@ def update_db_and_ui(new_entries):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RED-TACTICAL INTEL</title>
+    <title>RED-TACTICAL INVENTORY</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root { 
             --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9;
             --MALWARE: #f85149; --INITIAL: #f0883e; --POST_EXP: #a371f7; --AI_SEC: #58a6ff; --green: #7ee787;
         }
-        body { margin:0; display:flex; font-family:-apple-system, sans-serif; background:var(--bg); color:var(--text); overflow:hidden; }
+        body { margin:0; display:flex; font-family:-apple-system, sans-serif; background:var(--bg); color:var(--text); height: 100vh; overflow: hidden; }
         
         /* Sidebar */
-        nav { width: 260px; height: 100vh; background: #010409; border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+        nav { width: 280px; background: #010409; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
         .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
-        .sidebar-header h1 { font-size: 1.2rem; color: #fff; margin: 0 0 15px 0; }
-        #search-box { width:100%; padding:10px; background:#000; border:1px solid var(--border); color:var(--green); border-radius:6px; font-family:monospace; box-sizing:border-box; }
-        .date-links { padding: 10px; }
-        .date-item { padding: 10px; cursor: pointer; border-radius: 6px; font-size: 0.9rem; color: #8b949e; }
+        .sidebar-header h1 { font-size: 1.1rem; color: #fff; margin: 0 0 15px 0; letter-spacing: 1px; }
+        #search-box { width:100%; padding:10px; background:#000; border:1px solid var(--border); color:var(--green); border-radius:6px; outline:none; box-sizing:border-box; }
+        .date-links { flex: 1; overflow-y: auto; padding: 10px; }
+        .date-item { padding: 10px 15px; cursor: pointer; border-radius: 6px; font-size: 0.9rem; color: #8b949e; margin-bottom: 5px; }
         .date-item:hover { background: var(--card); color: #fff; }
-        .date-item.active { background: var(--card); color: var(--green); border-left: 3px solid var(--green); }
+        .date-item.active { background: #21262d; color: var(--green); border-left: 3px solid var(--green); }
 
-        /* Main Content */
-        main { flex: 1; height: 100vh; overflow-y: auto; padding: 20px; box-sizing: border-box; }
-        .feed-container { max-width: 850px; margin: 0 auto; }
-        .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; cursor:pointer; }
-        .card:hover { border-color: #8b949e; }
-        .cat-tag { font-size: 0.7rem; font-weight: bold; padding: 2px 8px; border-radius: 12px; margin-right: 10px; color: #fff; }
-        .card-title { font-weight:bold; font-size:1.2rem; line-height:1.4; color:#fff; margin: 10px 0; }
-        .card-summary { font-size: 0.85rem; color: #8b949e; }
+        /* Main Feed */
+        main { flex: 1; overflow-y: auto; padding: 20px; position: relative; }
+        .feed-container { max-width: 800px; margin: 0 auto; }
+        .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:20px; margin-bottom:15px; cursor:pointer; transition: 0.2s; }
+        .card:hover { border-color: #8b949e; transform: translateY(-2px); }
+        .cat-tag { font-size: 0.7rem; font-weight: bold; padding: 3px 10px; border-radius: 4px; margin-right: 10px; color: #fff; text-transform: uppercase; }
+        .card-title { font-weight:bold; font-size:1.25rem; line-height:1.4; color:#fff; margin: 12px 0; }
+        .card-summary { font-size: 0.9rem; color: #8b949e; line-height: 1.6; }
 
-        /* Detail View */
-        #detail-view { position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: right 0.3s cubic-bezier(0,0,0.2,1); z-index:1000; overflow-y:auto; }
+        /* Detail Layer */
+        #detail-view { position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: right 0.35s cubic-bezier(0,0,0.2,1); z-index:1000; overflow-y:auto; }
         #detail-view.open { right: 0; }
-        .detail-header { position:sticky; top:0; background:rgba(22,27,34,0.9); backdrop-filter:blur(10px); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; }
-        .back-btn { background:none; border:none; color:var(--green); font-size:1.5rem; cursor:pointer; padding: 0 20px; }
-        .detail-content { max-width: 850px; margin: 0 auto; padding: 30px 20px; }
-        .poc-link { display: inline-block; background: #238636; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 20px 0; }
+        .detail-header { position:sticky; top:0; background:rgba(22,27,34,0.95); backdrop-filter:blur(10px); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; z-index:10; }
+        .back-btn { background:none; border:none; color:var(--green); font-size:1.2rem; cursor:pointer; padding: 10px 20px; font-weight: bold; }
+        .detail-content { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+        .poc-btn { display: inline-block; background: #238636; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 20px 0; font-size: 0.9rem; }
+        .poc-btn:hover { background: #2ea043; }
         
         /* Markdown Style */
-        .detail-content h1, .detail-content h2 { border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 40px; }
-        .detail-content pre { background:#000; padding:20px; border-radius:10px; overflow-x:auto; border: 1px solid var(--border); position: relative; }
-        .detail-content code { color:var(--green); font-family: 'Consolas', monospace; }
-        .copy-btn { position:absolute; top:10px; right:10px; background:#21262d; border:1px solid var(--border); color:#fff; font-size:0.7rem; padding:5px 10px; border-radius:4px; cursor:pointer; }
+        .detail-content h2 { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-top: 40px; color: var(--accent); }
+        .detail-content pre { background:#000; padding:20px; border-radius:8px; overflow-x:auto; border: 1px solid var(--border); position: relative; margin: 20px 0; }
+        .detail-content code { color:var(--green); font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.9rem; }
+        .copy-btn { position:absolute; top:10px; right:10px; background:#21262d; border:1px solid var(--border); color:#fff; font-size:0.7rem; padding:4px 8px; border-radius:4px; cursor:pointer; }
+
+        .no-data { text-align: center; padding: 50px; color: #8b949e; }
 
         @media (max-width: 768px) {
-            nav { display: none; } /* Mobile simplicity */
-            #detail-view { width: 100%; }
+            nav { width: 100%; height: auto; position: fixed; bottom: 0; border-right: none; border-top: 1px solid var(--border); z-index: 50; }
+            .date-links { display: flex; overflow-x: auto; flex-direction: row; }
+            .date-item { white-space: nowrap; margin-bottom: 0; margin-right: 10px; }
+            main { padding-bottom: 100px; }
         }
     </style>
 </head>
 <body>
     <nav>
         <div class="sidebar-header">
-            <h1>RED-TACTICAL</h1>
-            <input type="text" id="search-box" placeholder="grep...">
+            <h1>RT-INVENTORY</h1>
+            <input type="text" id="search-box" placeholder="キーワード検索...">
         </div>
         <div class="date-links" id="date-list">
-            <div class="date-item active" onclick="filterDate('all')">All Intel</div>
+            <div class="date-item active" data-date="all">すべて</div>
         </div>
     </nav>
     <main>
         <div class="feed-container" id="feed"></div>
     </main>
+
     <div id="detail-view">
-        <div class="detail-header"><button class="back-btn" onclick="closeDetail()">← BACK</button><span id="det-cat"></span></div>
+        <div class="detail-header">
+            <button class="back-btn" onclick="closeDetail()">← 戻る</button>
+            <div id="det-cat"></div>
+        </div>
         <div class="detail-content" id="det-body"></div>
     </div>
 
     <script>
-        function b64DecodeUnicode(str) {
-            return decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-        }
-
-        const db = JSON.parse(b64DecodeUnicode("INSERT_BASE64_HERE"));
+        // Pythonから直接データを注入
+        const db = INSERT_DATA_HERE;
         let currentDate = 'all';
 
-        function initSidebar() {
+        function init() {
             const dates = [...new Set(db.map(a => a.date))];
             const list = document.getElementById('date-list');
             dates.forEach(d => {
                 const el = document.createElement('div');
                 el.className = 'date-item';
                 el.innerText = d;
-                el.onclick = () => filterDate(d, el);
+                el.onclick = () => {
+                    currentDate = d;
+                    document.querySelectorAll('.date-item').forEach(i => i.classList.remove('active'));
+                    el.classList.add('active');
+                    render();
+                };
                 list.appendChild(el);
             });
-        }
-
-        function filterDate(date, el) {
-            currentDate = date;
-            document.querySelectorAll('.date-item').forEach(i => i.classList.remove('active'));
-            if(el) el.classList.add('active'); else document.querySelector('.date-item').classList.add('active');
             render();
         }
 
@@ -203,11 +210,18 @@ def update_db_and_ui(new_entries):
             const feed = document.getElementById('feed');
             feed.innerHTML = '';
             
-            db.filter(a => {
+            const filtered = db.filter(a => {
                 const matchDate = currentDate === 'all' || a.date === currentDate;
                 const matchSearch = (a.title + a.summary + a.content).toLowerCase().includes(q);
                 return matchDate && matchSearch;
-            }).forEach(a => {
+            });
+
+            if (filtered.length === 0) {
+                feed.innerHTML = '<div class="no-data">表示できるインテリジェンスがありません。</div>';
+                return;
+            }
+
+            filtered.forEach(a => {
                 const el = document.createElement('div');
                 el.className = 'card';
                 el.innerHTML = `
@@ -226,11 +240,11 @@ def update_db_and_ui(new_entries):
         function openDetail(a) {
             const body = document.getElementById('det-body');
             let html = `<h1>${a.title}</h1>`;
-            if(a.poc_url && a.poc_url !== "") {
-                html += `<a href="${a.poc_url}" target="_blank" class="poc_link">🚀 VIEW PoC REPOSITORY</a>`;
+            if (a.poc_url) {
+                html += `<a href="${a.poc_url}" target="_blank" class="poc-btn">🚀 PoCコード・リポジトリを閲覧</a>`;
             }
             html += marked.parse(a.content);
-            html += `<hr style="border:0; border-top:1px solid var(--border); margin:40px 0;"><a href="${a.url}" target="_blank" style="color:var(--green);">[SOURCE ORIGINAL]</a>`;
+            html += `<hr style="border:0; border-top:1px solid var(--border); margin:40px 0;"><a href="${a.url}" target="_blank" style="color:var(--green); font-size:0.8rem;">[ ソース元記事を確認 ]</a>`;
             
             body.innerHTML = html;
             document.getElementById('det-cat').innerHTML = `<span class="cat-tag" style="background:var(--${a.category})">${a.category}</span>`;
@@ -253,14 +267,15 @@ def update_db_and_ui(new_entries):
         window.onpopstate = closeDetail;
         document.getElementById('search-box').oninput = render;
         
-        initSidebar();
-        render();
+        init();
     </script>
 </body>
 </html>
 '''
-    final_html = html_template.replace("INSERT_BASE64_HERE", db_base64)
+    # 直接文字列置換でデータを流し込む
+    final_html = html_template.replace("INSERT_DATA_HERE", db_json_str)
     with open("index.html", "w", encoding="utf-8") as f: f.write(final_html)
+    print("更新が完了しました。 index.html を確認してください。")
 
 if __name__ == "__main__":
     new_data = fetch_and_analyze()
