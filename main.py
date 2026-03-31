@@ -31,7 +31,7 @@ groq_client = Groq(api_key=GROQ_KEY)
 MASTER_DATA      = "all_articles.json"
 OUTPUT_HTML      = "index.html"
 MAX_DB_ENTRIES   = 200
-MIN_REPORT_LEN   = 600    # 品質フィルタ（詳細レポート対応）
+MIN_REPORT_LEN   = 1200   # 品質フィルタ（高品質レポート重視）
 MAX_RETRIES      = 3
 SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
@@ -43,27 +43,16 @@ FALLBACK_MODEL = "llama-3.1-8b-instant"   # TPD 500,000、速度重視
 # ─────────────────────────────────────────────
 # 検索クエリ（セキュリティ研究ソースに誘導）
 # ─────────────────────────────────────────────
+# クエリ1本に集約。候補を多く取って厳選する方針（量より質）
 SEARCH_CATEGORIES = {
-    # クエリ数を3→2に削減。最も技術情報が濃いクエリを優先して残す
-    "MALWARE": [
-        "malware technical analysis shellcode loader evasion persistence 2026",
-        "RAT backdoor C2 protocol obfuscation fileless LOLBAS",
-    ],
-    "INITIAL": [
-        "CVE 2026 critical RCE exploit proof of concept published",
-        "authentication bypass vulnerability exploit walkthrough writeup",
-    ],
-    "POST_EXP": [
-        "Active Directory privilege escalation kerberoasting RBCD EDR bypass 2026",
-        "lateral movement credential dumping LSASS new technique",
-    ],
-    "AI_SEC": [
-        "LLM prompt injection jailbreak exploit technique 2026",
-        "MCP tool poisoning agentic AI attack vector security",
-    ],
+    "MALWARE":  ["novel malware technical analysis loader shellcode evasion EDR bypass 2026"],
+    "INITIAL":  ["CVE 2026 exploit proof of concept RCE new vulnerability writeup"],
+    "POST_EXP": ["new post exploitation technique Active Directory privilege escalation EDR bypass 2026"],
+    "AI_SEC":   ["novel LLM AI agent attack technique jailbreak prompt injection MCP 2026"],
 }
 
-MAX_RESULTS_PER_QUERY = 2
+# 候補を多めに取得し、LLMの新規性フィルタで厳選する
+MAX_RESULTS_PER_QUERY = 4
 
 # ─────────────────────────────────────────────
 # プロンプト（レッドチーム再現手順特化）
@@ -109,49 +98,64 @@ def build_prompt(content: str, category: str) -> str:
 
 AUDIENCE: Red team testers who need to reproduce this attack in a lab environment TODAY. Zero tolerance for vague descriptions.
 {ctx}
-STRICT RULES FOR EACH SECTION:
+━━━ STEP 1: NOVELTY SCREENING (do this first, silently) ━━━
+Rate the source article novelty 1-5:
+  5 = New technique/CVE/tool, original research, new bypass not widely known
+  4 = Recent variant of known technique with meaningful new element
+  3 = Known technique with specific target/context details worth documenting
+  2 = General overview of existing technique, no new information
+  1 = Generic educational content, vendor marketing, no technical depth
+
+If novelty score is 1, 2, or 3: output ONLY this JSON:
+{{"skip": true, "reason": "新規性が低い記事のため除外（スコア3以下）"}}
+
+If novelty score is 4 or 5: write the COMPLETE report below. DO NOT truncate any section.
+
+━━━ STEP 2: FULL REPORT ━━━
+
+CRITICAL: Every section must be FULLY written. Never end a section with "..." or mid-sentence.
+If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Never cut other sections short.
 
 [## 概要]
 - 3〜5文で技術的要点を簡潔にまとめる
-- 末尾の1〜2文は必ず「新規性・差異化ポイント」を記載すること:
-  従来の類似攻撃・既知手法と比較して「何が新しいか」「何が従来と違うか」を具体的に述べる
+- 末尾1〜2文: 必ず「新規性・差異化ポイント」を記載
   例: "従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である"
-  例: "既存のEDR製品がフックするABC APIを一切使用しない点が新しい"
-  情報が不足する場合は同カテゴリの既知手法との差異を推定して [推測] を付与する
+  情報不足の場合は既知手法との差異を推定して [推測] を付与
 
 [## 脆弱性・脅威の技術的メカニズム]
-- Explain the ROOT CAUSE at a technical depth sufficient to understand WHY the attack works
-- Include: specific API calls, memory layouts, protocol fields, code paths, data structures
-- For CVEs: explain the exact vulnerable condition, not just "improper validation"
-- For malware: explain the internal execution flow step by step
-- Minimum 200 words. No surface-level descriptions.
+- ROOT CAUSEを技術的深度で説明（APIコール名・メモリレイアウト・プロトコルフィールド・コードパス）
+- CVEの場合: 脆弱なコードパス・トリガー条件・パッチ差分
+- マルウェアの場合: 復号→マッピング→実行の内部フロー
+- 最低200ワード。表面的な説明は不可
 
 [## 再現手順（レッドチームテスター向け）]
-- Write as a numbered checklist that a tester can follow in order
-- Each step must be a CONCRETE ACTION: "Install X", "Run Y with Z flags", "Verify by checking W"
-- Include: lab setup requirements, target prerequisites, required credentials/access level
-- If source lacks detail, fill gaps from your knowledge and mark as [推測]
-- Do NOT write "attacker does X" — write "1. Set up listener: ..."
+- 番号付きチェックリスト形式
+- 各ステップは具体的アクション（"ツールXをインストール"、"Yフラグ付きでZを実行"）
+- ラボ環境要件・ターゲット前提条件・必要権限を含む
+- 情報不足は知識から補完して [推測] を付与
+- "攻撃者がXをする"禁止。"1. リスナーを立てる: ..."形式
 
-[## 実行コマンド]
-- Every command must be COMPLETE and RUNNABLE with realistic placeholder values
-- Include full flags, not abbreviated. Use 192.168.1.10 as target IP, CORP.LOCAL as domain
-- Show command output verification where relevant
-- Example of REQUIRED quality:
-  BAD:  impacket-secretsdump domain/user@target
-  GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:'P@ssw0rd'@192.168.1.10 -outputfile /tmp/hashes.txt && cat /tmp/hashes.txt
+[## 実行コマンド・再現コード]
+- コマンドは完全で実行可能。プレースホルダー: IP=192.168.1.10, ドメイン=CORP.LOCAL
+- 記事に登場するコード・スクリプト・ペイロードを必ず再現して記載
+- PoCやエクスプロイトコードがある場合はPython/Bash等の実装例を示す
+- BAD: impacket-secretsdump domain/user@target
+- GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:'P@ssw0rd'@192.168.1.10 -outputfile /tmp/hashes.txt
 
 [## MITRE ATT&CK マッピング]
-List specific Technique IDs with sub-technique where applicable (e.g. T1055.012, not just T1055).
+サブテクニックIDまで記載（例: T1055.012）
 
 [## 検知シグネチャ・緩和策]
-Include at minimum one concrete detection rule (Sigma/YARA/KQL snippet preferred, not prose).
+最低1つの具体的な検知ルール（Sigma/YARA/KQLスニペット推奨）
 
-OUTPUT: ONLY a valid JSON object. No markdown fences around the JSON. Use \\n for newlines.
-Schema: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n（3〜5文。末尾に新規性・従来手法との差異を必ず記載）\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知シグネチャ・緩和策\\n```\\n...\\n```"}}
+OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \\n for newlines.
+
+Skip: {{"skip": true, "reason": "理由"}}
+
+Full: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n...\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド・再現コード\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知シグネチャ・緩和策\\n```\\n...\\n```"}}
 
 SOURCE ARTICLE:
-{content[:5000]}"""
+{content[:8000]}"""
 
 # ─────────────────────────────────────────────
 # JSON抽出（deepseek-r1の<think>対応を強化）
@@ -187,6 +191,9 @@ def validate_result(res: dict) -> bool:
     """品質フィルタ: 必須フィールドと最低品質チェック"""
     if not res:
         return False
+    # 新規性スコアが低い記事はskipフラグで除外
+    if res.get("skip"):
+        return False
     if not res.get("title") or len(res["title"]) < 5:
         return False
     if not res.get("report") or len(res["report"]) < MIN_REPORT_LEN:
@@ -215,7 +222,7 @@ def call_llm(prompt: str) -> dict | None:
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=3000,  # 詳細レポートに対応
+                    max_tokens=4096,  # 記事が途中で切れないよう最大値に設定
                     # json_objectモードはdeepseek-r1で不安定なため使用しない
                     # → プロンプトで制御し extract_json で取り出す
                 )
@@ -225,6 +232,10 @@ def call_llm(prompt: str) -> dict | None:
                 if result and validate_result(result):
                     print(f"    ✓ [{model}] attempt {attempt+1} — OK")
                     return result
+
+                if result and result.get("skip"):
+                    print(f"    ✗ [{model}] 新規性なし — {result.get('reason','')}")
+                    return None  # skipは即座に終了、リトライ不要
 
                 print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足, retry...")
                 time.sleep(2)
@@ -261,15 +272,23 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
         cat_count = 0
 
         for query in queries:
+            if cat_count >= 1:
+                print(f"  [{cat_id}] 1件取得済み — 残クエリをスキップ")
+                break
             try:
                 results = tavily.search(
                     query=query,
-                    search_depth="advanced",    # basicだと動的サイトの本文が取れない
+                    search_depth="advanced",
                     max_results=MAX_RESULTS_PER_QUERY,
                     search_period="week",
                 )["results"]
 
+                # スコアでソート（Tavilyのscoreが高い順 = より関連性が高い）
+                results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
                 for item in results:
+                    if cat_count >= 1:
+                        break  # 1件取れたら次クエリへ
                     url     = item.get("url", "")
                     content = item.get("content", "")
 
@@ -278,7 +297,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                         continue
                     seen_urls.add(url)
 
-                    # advanced検索でもコンテンツが少ない場合はスキップ（動的サイト対策）
+                    # コンテンツ不足スキップ
                     if len(content) < 600:
                         print(f"  skip (short content): {url[:60]}")
                         continue
@@ -462,7 +481,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background:linear-gradient(90deg,var(--acc),transparent)}
 .logo-name{
   font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
-  color:var(--acc);text-shadow:0 0 24px rgba(56,191,255,.35);line-height:1;
+  color:var(--acc);line-height:1;
 }
 .logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
 .logo-log-link{
@@ -496,7 +515,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .cat-btn.active[data-cat="POST_EXP"]{background:rgba(176,106,255,.1);border-color:var(--POST_EXP);color:var(--POST_EXP)}
 .cat-btn.active[data-cat="AI_SEC"]{background:rgba(56,191,255,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
 
-.date-list{flex:1;overflow-y:auto;padding:8px}
+.date-list{flex:1;overflow-y:auto;padding:8px;overscroll-behavior:contain}
 .date-item{
   padding:7px 10px;border-radius:3px;cursor:pointer;
   font-family:var(--mono);font-size:.7rem;color:var(--muted);
@@ -519,10 +538,10 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 
 .stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
 .stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 8px rgba(56,191,255,.3)}
+  }
 
 /* ── Main feed ── */
-.main-feed{flex:1;overflow-y:auto;padding:16px}
+.main-feed{flex:1;overflow-y:auto;padding:16px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .feed{max-width:860px;margin:0 auto}
 .day-label{
   font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);
@@ -534,9 +553,9 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 /* ── Card ── */
 .card{
   background:var(--surf);border:1px solid var(--bdr);border-radius:4px;
-  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .18s,border-color .18s,transform .18s;
+  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .15s,border-color .15s;
   position:relative;overflow:hidden;
-  will-change:transform;contain:layout style;
+  contain:content;
 }
 .card-source-link{
   display:inline-block;margin-top:8px;
@@ -550,8 +569,8 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 .card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
 .card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
 .card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
-.card:hover{background:var(--surf2);border-color:var(--bdr2);transform:translateX(3px)}
-.card:active{transform:translateX(1px)}
+.card:hover{background:var(--surf2);border-color:var(--bdr2)}
+.card:active{opacity:.85}
 
 .card-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .cat-tag{
@@ -590,6 +609,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   background:rgba(56,191,255,.07);color:var(--acc);
   border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
   animation:blink 2s infinite;
+  will-change:opacity;
 }
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
 .no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.1em}
@@ -630,7 +650,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   padding:8px 16px;border-radius:3px;text-decoration:none;
   font-family:var(--mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
 }
-.poc-btn:hover{background:rgba(56,191,255,.15);box-shadow:0 0 14px rgba(56,191,255,.15)}
+.poc-btn:hover{background:rgba(56,191,255,.15)}
 
 /* markdown */
 .det-inner h1{display:none}
@@ -681,7 +701,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
     background:linear-gradient(90deg,var(--acc),transparent 60%)}
   .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
-    color:var(--acc);letter-spacing:.1em;text-shadow:0 0 16px rgba(56,191,255,.3)}
+    color:var(--acc);letter-spacing:.1em;}
   .mob-search-btn{background:none;border:1px solid var(--bdr2);color:var(--text);
     padding:5px 10px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.65rem}
 
@@ -709,7 +729,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
   }
   .tab-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5}
   .tab-btn.active{color:var(--acc);border-top-color:var(--acc)}
-  .tab-btn.active svg{filter:drop-shadow(0 0 4px var(--acc))}
+  .tab-btn.active svg{opacity:1}
 
   /* mobile date drawer */
   .mob-drawer{
@@ -822,7 +842,7 @@ const today = new Date().toISOString().slice(0,10);
 const deskSearch = document.getElementById('search-box-desk');
 const mobSearch  = document.getElementById('search-box');
 if(deskSearch) deskSearch.oninput = e => { if(mobSearch) mobSearch.value = e.target.value; render(); };
-if(mobSearch)  mobSearch.oninput  = e => { if(deskSearch) deskSearch.value = e.target.value; render(); };
+if(mobSearch)  mobSearch.oninput  = e => { if(deskSearch) deskSearch.value = e.target.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
 
 function getQuery(){ return (deskSearch||mobSearch)?.value.toLowerCase() || ''; }
 
@@ -928,11 +948,12 @@ function render(){
   if(!filtered.length){feed.innerHTML='<div class="no-data">// NO INTELLIGENCE FOUND //</div>';return;}
   const groups={};
   filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a);});
+  const frag=document.createDocumentFragment();
   Object.keys(groups).sort().reverse().forEach(date=>{
     const lbl=document.createElement('div');
     lbl.className='day-label';
     lbl.innerHTML=date+(date===today?' &nbsp;<span style="color:var(--acc);font-size:.55rem">TODAY</span>':'');
-    feed.appendChild(lbl);
+    frag.appendChild(lbl);
     groups[date].forEach(a=>{
       const card=document.createElement('div');
       card.className='card';card.dataset.cat=a.category;
@@ -954,9 +975,10 @@ function render(){
       card.onclick=()=>openDetail(a);
       // ソースリンクはカード全体のクリックイベントを止める
       card.querySelector('.card-source-link').onclick=e=>e.stopPropagation();
-      feed.appendChild(card);
+      frag.appendChild(card);
     });
   });
+  feed.appendChild(frag);
 }
 
 function openDetail(a){
