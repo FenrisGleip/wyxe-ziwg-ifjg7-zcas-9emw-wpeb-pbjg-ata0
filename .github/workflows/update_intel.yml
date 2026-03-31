@@ -37,7 +37,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add all_articles.json articles.js index.html
+          git add all_articles.json articles.js index.html log.html log.js run_log.json
           # 変更がない場合はコミットしない（エラー回避）
           git diff --staged --quiet || git commit -m "chore: update intel feed $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
