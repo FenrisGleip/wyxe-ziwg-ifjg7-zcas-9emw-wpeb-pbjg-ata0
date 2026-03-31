@@ -493,16 +493,33 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 }
 .logo-log-link:hover{color:var(--acc2);border-color:var(--acc2)}
 
-.search-wrap{padding:10px 12px;border-bottom:1px solid var(--bdr)}
-#search-box{
-  width:100%;padding:8px 10px 8px 28px;background:var(--bg);
-  border:1px solid var(--bdr2);color:var(--hi);border-radius:3px;
-  outline:none;font-family:var(--mono);font-size:.72rem;transition:.2s;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%232c4035' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:10px center;
+.search-wrap{
+  padding:10px 12px 12px;border-bottom:1px solid var(--bdr);position:relative;
 }
-#search-box:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(56,191,255,.08)}
-#search-box::placeholder{color:var(--muted)}
+.search-wrap::before{
+  content:'';position:absolute;
+  left:22px;top:50%;transform:translateY(-50%);
+  width:12px;height:12px;pointer-events:none;
+  background:var(--muted);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+  transition:.2s;
+}
+.search-wrap:focus-within::before{background:var(--acc)}
+#search-box-desk{
+  width:100%;padding:9px 12px 9px 32px;
+  background:var(--surface2);
+  border:1px solid var(--bdr);
+  color:var(--hi);border-radius:3px;
+  outline:none;font-family:var(--mono);font-size:.72rem;
+  transition:border-color .2s,background .2s;
+  caret-color:var(--acc);
+}
+#search-box-desk:focus{
+  border-color:var(--acc);
+  background:var(--bg);
+}
+#search-box-desk::placeholder{color:var(--muted);letter-spacing:.03em}
 
 .filter-wrap{padding:8px 10px;border-bottom:1px solid var(--bdr);display:flex;gap:4px;flex-wrap:wrap}
 .cat-btn{
@@ -616,6 +633,63 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
 .no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.1em}
 
+/* ── Card action buttons ── */
+.card-actions{display:flex;gap:5px;margin-top:10px;padding-top:8px;border-top:1px solid var(--bdr)}
+.act-btn{
+  font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.06em;
+  padding:3px 10px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
+  background:none;border:1px solid var(--bdr2);color:var(--muted);
+}
+.act-btn:hover{color:var(--hi);border-color:var(--text)}
+.act-btn.flag-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
+.act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
+
+/* ── Detail action bar ── */
+.det-action-bar{display:flex;gap:8px;margin:16px 0;padding-bottom:16px;border-bottom:1px solid var(--bdr);flex-wrap:wrap}
+.det-act-btn{
+  font-family:var(--mono);font-size:.65rem;font-weight:700;letter-spacing:.06em;
+  padding:6px 16px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
+  background:none;border:1px solid var(--bdr2);color:var(--muted);
+}
+.det-act-btn:hover{color:var(--hi);border-color:var(--text)}
+.det-act-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
+.det-act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
+.det-act-btn.teams-btn{border-color:rgba(100,153,255,.3);color:#6499ff}
+.det-act-btn.teams-btn:hover{background:rgba(100,153,255,.08);border-color:rgba(100,153,255,.5)}
+.det-act-btn.teams-btn.sending{opacity:.5;pointer-events:none}
+
+/* ── Teams settings modal ── */
+.modal-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;
+  align-items:center;justify-content:center;
+}
+.modal-overlay.open{display:flex}
+.modal{
+  background:var(--surf);border:1px solid var(--bdr2);border-radius:6px;
+  padding:28px 24px;max-width:480px;width:90%;position:relative;
+}
+.modal h3{font-family:var(--disp);font-size:1.1rem;color:var(--hi);margin-bottom:6px;letter-spacing:.05em}
+.modal p{font-size:.75rem;color:var(--muted);margin-bottom:16px;line-height:1.6}
+.modal label{display:block;font-family:var(--mono);font-size:.62rem;color:var(--text);margin-bottom:5px;letter-spacing:.06em}
+.modal input{
+  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--bdr2);
+  color:var(--hi);border-radius:3px;outline:none;font-family:var(--mono);font-size:.72rem;
+  margin-bottom:14px;transition:.2s;
+}
+.modal input:focus{border-color:var(--acc)}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
+.modal-btn{
+  font-family:var(--mono);font-size:.65rem;font-weight:700;padding:7px 18px;
+  border-radius:2px;cursor:pointer;transition:.15s;border:1px solid var(--bdr2);
+  background:none;color:var(--muted);
+}
+.modal-btn:hover{color:var(--hi);border-color:var(--text)}
+.modal-btn.primary{background:rgba(56,191,255,.1);color:var(--acc);border-color:rgba(56,191,255,.3)}
+.modal-btn.primary:hover{background:rgba(56,191,255,.18)}
+.teams-status{font-family:var(--mono);font-size:.6rem;margin-top:10px;padding:8px 10px;border-radius:3px;display:none}
+.teams-status.ok{background:rgba(56,191,255,.08);color:var(--acc);border:1px solid rgba(56,191,255,.2);display:block}
+.teams-status.err{background:rgba(255,68,85,.08);color:var(--MALWARE);border:1px solid rgba(255,68,85,.2);display:block}
+
 /* ── Detail overlay ── */
 #detail{
   position:fixed;inset:0;background:var(--bg);z-index:200;
@@ -696,23 +770,22 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 
   /* top bar */
   .mob-header{
-    display:flex;align-items:center;justify-content:space-between;
+    display:flex;align-items:center;gap:10px;
     padding:10px 14px;background:var(--surf);border-bottom:1px solid var(--bdr);
     flex-shrink:0;position:relative;
   }
   .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
     background:linear-gradient(90deg,var(--acc),transparent 60%)}
+  /* モバイル検索: mob-headerに統合 */
+  .mob-header #mob-search-inline{
+    flex:1;padding:7px 10px;background:var(--surface2);border:1px solid var(--bdr);
+    color:var(--hi);border-radius:3px;outline:none;
+    font-family:var(--mono);font-size:.72rem;caret-color:var(--acc);
+  }
+  .mob-header #mob-search-inline:focus{border-color:var(--acc)}
+  .mob-header #mob-search-inline::placeholder{color:var(--muted)}
   .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
     color:var(--acc);letter-spacing:.1em;}
-  .mob-search-btn{background:none;border:1px solid var(--bdr2);color:var(--text);
-    padding:5px 10px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.65rem}
-
-  /* collapsible search bar */
-  .mob-search-wrap{
-    display:none;padding:8px 12px;background:var(--surf);border-bottom:1px solid var(--bdr);
-  }
-  .mob-search-wrap.open{display:block}
-  .mob-search-wrap #search-box{font-size:.8rem}
 
   /* feed takes full width */
   .main-feed{flex:1;overflow-y:auto;padding:10px 10px 80px}
@@ -760,10 +833,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 <!-- MOBILE HEADER -->
 <div class="mob-header">
   <span class="mob-logo">CIPHER</span>
-  <button class="mob-search-btn" onclick="toggleMobSearch()">SEARCH</button>
-</div>
-<div class="mob-search-wrap" id="mob-search-wrap">
-  <input type="text" id="search-box" placeholder="search intel..." autocomplete="off">
+  <input type="text" id="mob-search-inline" placeholder="search..." autocomplete="off">
 </div>
 
 <!-- DESKTOP LAYOUT -->
@@ -773,6 +843,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
       <div class="logo-name">CIPHER</div>
       <div class="logo-sub">// THREAT INTELLIGENCE</div>
       <a href="log.html" class="logo-log-link">📋 調査ログ</a>
+      <a href="#" class="logo-log-link" onclick="openTeamsModal();return false;">💬 Teams設定</a>
     </div>
     <div class="search-wrap">
       <input type="text" id="search-box-desk" placeholder="search intel..." autocomplete="off">
@@ -823,6 +894,22 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 </div>
 
 <!-- DETAIL VIEW -->
+
+<!-- Teams settings modal -->
+<div class="modal-overlay" id="teams-modal">
+  <div class="modal">
+    <h3>Microsoft Teams 連携</h3>
+    <p>Incoming Webhook URL を設定すると、記事をTeamsチャンネルに投稿できます。<br>
+    Teams → チャンネル → コネクタ → Incoming Webhook から取得してください。</p>
+    <label>WEBHOOK URL</label>
+    <input type="url" id="teams-webhook-input" placeholder="https://xxx.webhook.office.com/webhookb2/...">
+    <div class="modal-btns">
+      <button class="modal-btn" onclick="closeTeamsModal()">CANCEL</button>
+      <button class="modal-btn primary" onclick="saveTeamsWebhook()">SAVE</button>
+    </div>
+    <div class="teams-status" id="teams-modal-status"></div>
+  </div>
+</div>
 <div id="detail">
   <div class="det-header">
     <button class="back-btn" onclick="closeDetail()">← BACK</button>
@@ -842,18 +929,23 @@ let activeCat  = 'ALL';
 let activeDate = 'all';
 const today = new Date().toISOString().slice(0,10);
 
-/* ── User state (read / flagged / deleted) via window.storage ── */
-let userState = { read: {}, flagged: {}, deleted: {} }; // url -> true
+/* ── User state (deleted / flagged / read) via localStorage ── */
+let userState = { read: {}, flagged: {}, deleted: {} };
+const STATE_KEY = 'cipher-user-state';
 
 async function loadUserState() {
   try {
-    const r = await window.storage.get('cipher-user-state');
-    if (r) userState = JSON.parse(r.value);
-  } catch(e) { /* 初回 */ }
+    const raw = localStorage.getItem(STATE_KEY);
+    if (raw) userState = JSON.parse(raw);
+  } catch(e) { /* 初回または無効データ */ }
 }
 
 async function saveUserState() {
-  try { await window.storage.set('cipher-user-state', JSON.stringify(userState)); } catch(e) {}
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify(userState));
+  } catch(e) {
+    console.warn('userState save failed:', e);
+  }
 }
 
 function isRead(url)    { return !!userState.read[url] }
@@ -875,12 +967,12 @@ function unreadCount() { return db.filter(a => !isRead(a.url) && !isDeleted(a.ur
 function flaggedCount(){ return db.filter(a => isFlagged(a.url) && !isDeleted(a.url)).length; }
 
 /* ── search sync (desktop + mobile share same state) ── */
-const deskSearch = document.getElementById('search-box-desk');
-const mobSearch  = document.getElementById('search-box');
-if(deskSearch) deskSearch.oninput = e => { if(mobSearch) mobSearch.value = e.target.value; render(); };
-if(mobSearch)  mobSearch.oninput  = e => { if(deskSearch) deskSearch.value = e.target.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
+const searchBox = document.getElementById('search-box-desk');
+const mobSearchInline = document.getElementById('mob-search-inline');
+if(searchBox) searchBox.oninput = () => { if(mobSearchInline) mobSearchInline.value = searchBox.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
+if(mobSearchInline) mobSearchInline.oninput = () => { if(searchBox) searchBox.value = mobSearchInline.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
 
-function getQuery(){ return (deskSearch||mobSearch)?.value.toLowerCase() || ''; }
+function getQuery(){ return (searchBox?.value || mobSearchInline?.value || '').toLowerCase(); }
 
 function cvssClass(s){
   const n=parseFloat(s);
@@ -888,6 +980,86 @@ function cvssClass(s){
   if(n>=9)return'cvss-critical';if(n>=7)return'cvss-high';if(n>=4)return'cvss-medium';return'cvss-low';
 }
 function isPocValid(u){return u&&u.startsWith('http')}
+
+
+/* ── Teams webhook ── */
+const TEAMS_KEY = 'cipher_teams_webhook';
+function getWebhook(){ return localStorage.getItem(TEAMS_KEY)||''; }
+function saveTeamsWebhook(){
+  const url = document.getElementById('teams-webhook-input').value.trim();
+  if(!url){ showTeamsStatus('URL を入力してください', 'err'); return; }
+  localStorage.setItem(TEAMS_KEY, url);
+  showTeamsStatus('保存しました', 'ok');
+  setTimeout(closeTeamsModal, 1000);
+}
+function openTeamsModal(){
+  document.getElementById('teams-webhook-input').value = getWebhook();
+  document.getElementById('teams-modal-status').className = 'teams-status';
+  document.getElementById('teams-modal').classList.add('open');
+}
+function closeTeamsModal(){ document.getElementById('teams-modal').classList.remove('open'); }
+function showTeamsStatus(msg, type){
+  const el = document.getElementById('teams-modal-status');
+  el.textContent = msg; el.className = 'teams-status '+type;
+}
+document.addEventListener('click', e => {
+  if(e.target && e.target.id === 'teams-modal') closeTeamsModal();
+});
+
+async function postToTeams(article){
+  const webhook = getWebhook();
+  if(!webhook){ openTeamsModal(); return; }
+  const btn = document.getElementById('det-teams-btn');
+  if(btn){ btn.textContent='SENDING...'; btn.classList.add('sending'); }
+
+  const cvssText = article.cvss_score ? ' | CVSS ' + article.cvss_score : '';
+  const mitreText = (article.mitre_ids||[]).slice(0,3).join(', ');
+  const summary = (article.summary_points||[]).map(function(p){ return '\u2022 '+p; }).join('\n');
+
+  const payload = {
+    type: 'message',
+    attachments: [{
+      contentType: 'application/vnd.microsoft.card.adaptive',
+      content: {
+        '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
+        type: 'AdaptiveCard',
+        version: '1.4',
+        body: [
+          {
+            type: 'Container',
+            style: 'emphasis',
+            items: [{
+              type: 'TextBlock',
+              text: '[' + article.category + ']' + cvssText,
+              size: 'Small', color: 'Accent', weight: 'Bolder'
+            }]
+          },
+          { type: 'TextBlock', text: article.title, size: 'Large', weight: 'Bolder', wrap: true },
+          { type: 'TextBlock', text: summary, wrap: true, spacing: 'Small' },
+          ...(mitreText ? [{ type: 'TextBlock', text: 'ATT&CK: ' + mitreText, size: 'Small', color: 'Good', spacing: 'Small' }] : [])
+        ],
+        actions: [
+          { type: 'Action.OpenUrl', title: 'ソース記事を開く', url: article.url }
+        ]
+      }
+    }]
+  };
+
+  try {
+    await fetch(webhook, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+      mode: 'no-cors'
+    });
+    if(btn){ btn.textContent='SENT'; btn.classList.remove('sending'); }
+    setTimeout(function(){ if(btn) btn.textContent='TEAMS'; }, 2000);
+  } catch(err){
+    if(btn){ btn.textContent='FAILED'; btn.classList.remove('sending'); }
+    setTimeout(function(){ if(btn) btn.textContent='TEAMS'; }, 2000);
+    console.error('Teams post error:', err);
+  }
+}
 
 /* ── init ── */
 async function init(){
@@ -1026,10 +1198,8 @@ function render(){
       const actions = document.createElement('div');
       actions.className = 'card-actions';
       actions.innerHTML = `
-        <button class="act-btn flag-btn ${isFlagged(a.url)?'flagged':''}" title="フラグ">
-          ${isFlagged(a.url)?'⚑ フラグ済':'⚐ フラグ'}
-        </button>
-        <button class="act-btn delete-btn" title="削除">🗑 削除</button>
+        <button class="act-btn flag-btn ${isFlagged(a.url)?'flagged':''}">${isFlagged(a.url)?'FLAG ●':'FLAG'}</button>
+        <button class="act-btn delete-btn">DEL</button>
       `;
       actions.querySelector('.flag-btn').onclick = async e => {
         e.stopPropagation();
@@ -1071,8 +1241,9 @@ async function openDetail(a){
       ${metaHtml}
     </div>
     <div class="det-action-bar">
-      <button class="det-act-btn ${isFlagged(a.url)?'flagged':''}" id="det-flag-btn">${flagLabel}</button>
-      <button class="det-act-btn delete-btn" id="det-delete-btn">🗑 削除</button>
+      <button class="det-act-btn ${isFlagged(a.url)?'flagged':''}" id="det-flag-btn">${isFlagged(a.url)?'FLAG ●':'FLAG'}</button>
+      <button class="det-act-btn delete-btn" id="det-delete-btn">DEL</button>
+      <button class="det-act-btn teams-btn" id="det-teams-btn">TEAMS</button>
     </div>
     ${marked.parse(a.content)}
     <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bdr)">
@@ -1103,6 +1274,7 @@ async function openDetail(a){
       await deleteArticle(a.url); closeDetail(); render();
     }
   };
+  document.getElementById('det-teams-btn').onclick = () => postToTeams(a);
 
   document.getElementById('detail').classList.add('open');
   history.pushState({view:'detail'},'');
@@ -1127,11 +1299,7 @@ function closeMobDrawer(){
   document.getElementById('tab-feed')?.classList.add('active');
   document.querySelectorAll('.tab-btn:not(#tab-feed)').forEach(b=>b.classList.remove('active'));
 }
-function toggleMobSearch(){
-  const w=document.getElementById('mob-search-wrap');
-  w.classList.toggle('open');
-  if(w.classList.contains('open')) document.getElementById('search-box')?.focus();
-}
+
 init();
 </script>
 </body>
