@@ -375,10 +375,7 @@ def _build_index_html() -> str:
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
 
-/* ── noise overlay ── */
-body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
-  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
-  background-size:200px;opacity:.4}
+/* noise overlay removed for scroll performance */
 
 /* ════════════════════════════════
    DESKTOP LAYOUT
@@ -470,14 +467,22 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
 /* ── Card ── */
 .card{
   background:var(--surf);border:1px solid var(--bdr);border-radius:4px;
-  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:.18s;
+  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .18s,border-color .18s,transform .18s;
   position:relative;overflow:hidden;
+  will-change:transform;contain:layout style;
 }
+.card-source-link{
+  display:inline-block;margin-top:8px;
+  font-family:var(--mono);font-size:.58rem;color:var(--muted);
+  text-decoration:none;letter-spacing:.04em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+}
+.card-source-link:hover{color:var(--acc2)}
 .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px}
-.card[data-cat="MALWARE"]::before{background:var(--MALWARE);box-shadow:0 0 6px var(--MALWARE)}
-.card[data-cat="INITIAL"]::before{background:var(--INITIAL);box-shadow:0 0 6px var(--INITIAL)}
-.card[data-cat="POST_EXP"]::before{background:var(--POST_EXP);box-shadow:0 0 6px var(--POST_EXP)}
-.card[data-cat="AI_SEC"]::before{background:var(--AI_SEC);box-shadow:0 0 6px var(--AI_SEC)}
+.card[data-cat="MALWARE"]::before{background:var(--MALWARE)}
+.card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
+.card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
+.card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
 .card:hover{background:var(--surf2);border-color:var(--bdr2);transform:translateX(3px)}
 .card:active{transform:translateX(1px)}
 
@@ -530,7 +535,7 @@ body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
 }
 #detail.open{transform:none}
 .det-header{
-  background:rgba(12,23,18,.96);backdrop-filter:blur(12px);
+  background:rgba(12,23,18,.98);
   border-bottom:1px solid var(--bdr);padding:12px 16px;
   display:flex;align-items:center;gap:10px;flex-shrink:0;position:relative;
 }
@@ -868,6 +873,7 @@ function render(){
       const sumHtml=pts.length?'<ul class="card-summary">'+pts.map(p=>`<li>${p}</li>`).join('')+'</ul>':`<div class="card-summary">${a.summary||''}</div>`;
       const cvssHtml=a.cvss_score?`<span class="cvss-badge ${cvssClass(a.cvss_score)}">CVSS ${a.cvss_score}</span>`:'';
       const mitreHtml=(a.mitre_ids||[]).slice(0,3).map(id=>`<span class="mitre-chip">${id}</span>`).join('');
+      const sourceHost = (() => { try { return new URL(a.url).hostname.replace('www.',''); } catch(e){ return a.url; } })();
       const pocHtml=isPocValid(a.poc_url)?'<span class="poc-chip">⚡ PoC</span>':'';
       card.innerHTML=`
         <div class="card-meta">
@@ -876,8 +882,11 @@ function render(){
         </div>
         <div class="card-title">${a.title}</div>
         ${sumHtml}
-        ${(mitreHtml||pocHtml)?`<div class="card-footer">${mitreHtml}${pocHtml}</div>`:''}`;
+        ${(mitreHtml||pocHtml)?`<div class="card-footer">${mitreHtml}${pocHtml}</div>`:''}
+        <a href="${a.url}" target="_blank" class="card-source-link" title="${a.url}">📎 ${sourceHost}</a>`;
       card.onclick=()=>openDetail(a);
+      // ソースリンクはカード全体のクリックイベントを止める
+      card.querySelector('.card-source-link').onclick=e=>e.stopPropagation();
       feed.appendChild(card);
     });
   });
