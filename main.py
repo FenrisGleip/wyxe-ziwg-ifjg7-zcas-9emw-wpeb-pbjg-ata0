@@ -1,4 +1,4 @@
-“”“RED-TACTICAL INTELLIGENCE AGENT v3.1”””
+# RED-TACTICAL INTELLIGENCE AGENT v3.1
 
 import os
 import json
@@ -68,8 +68,6 @@ MALWARE ANALYSIS FOCUS:
 - C2 protocol: HTTP/DNS/custom, beaconing interval, jitter, encoding (base64/custom), URI patterns
 - Persistence: exact registry key path, scheduled task XML, WMI subscription query
 - EDR evasion: AMSI bypass method, ETW patching, direct syscalls, process hollowing target
-  “””,
-  “INITIAL”: “””
   INITIAL ACCESS FOCUS:
 - Root cause: exact vulnerable code path, which parameter/header/field triggers the bug
 - Vulnerability class: buffer overflow offset, SQL injection context, deserialization gadget chain, auth logic bypass condition
