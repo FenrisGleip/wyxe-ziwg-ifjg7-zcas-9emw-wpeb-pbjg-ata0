@@ -17,10 +17,10 @@ MASTER_DATA = "all_articles.json"
 def fetch_and_analyze():
     target_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     categories = {
-        "MALWARE": f'"{target_date}" malware technical analysis (persistence OR evasion) 2026',
-        "INITIAL": f'"{target_date}" (initial access OR "ClickFix") POC delivery 2026',
-        "POST_EXP": f'"{target_date}" (Credential Access OR "Lateral Movement") attack PoC 2026',
-        "AI_SEC": f'"{target_date}" (Prompt Injection OR "Model Inversion") attack vector 2026'
+        "MALWARE": f'"{target_date}" malware technical analysis persistence 2026',
+        "INITIAL": f'"{target_date}" initial access POC delivery 2026',
+        "POST_EXP": f'"{target_date}" Active Directory attack PoC 2026',
+        "AI_SEC": f'"{target_date}" Prompt Injection attack vector 2026'
     }
     
     new_articles = []
@@ -30,21 +30,9 @@ def fetch_and_analyze():
             for item in search_res:
                 if any(x['url'] == item['url'] for x in new_articles): continue
                 
-                prompt = f"""
-                あなたはレッドチーム・リサーチャーです。情報を「武器化」してください。
-                1. **Weapon_ID**: [CVE/Name] Target -> Method
-                2. **Tactical_Flow**: 攻撃ステップのASCII ART
-                3. **Target_Requirements**: 環境（OS、権限等）
-                4. **Exploit_Payload**: `export TARGET=...` から始まる実戦コマンド
-                5. **Detection_Evasion**: 回避ロジック
-                6. **Detection_Rule**: 検知クエリ
-
-                URL: {item['url']}
-                Content: {item['content'][:8000]}
-                """
+                prompt = "あなたはレッドチーム・リサーチャーです。以下の情報を「武器化」し、Weapon_ID, Tactical_Flow, Target_Requirements, Exploit_Payload, Detection_Evasion, Detection_Rule の順で詳細にまとめなさい。具体的コマンドを含めること。\n\nURL: " + item['url'] + "\nContent: " + item['content'][:8000]
                 
                 try:
-                    # レートリミットに強い 8b モデルを使用
                     response = groq.chat.completions.create(
                         model="llama-3.1-8b-instant",
                         messages=[{"role": "user", "content": prompt}],
@@ -54,7 +42,7 @@ def fetch_and_analyze():
                     if "SKIP" in res_text[:10]: continue
 
                     attack_id = re.search(r'T\d{4}(?:\.\d{3})?', res_text)
-                    title_match = re.search(r'Weapon_ID\*\*: (.*)', res_text)
+                    title_match = re.search(r'Weapon_ID: (.*)', res_text)
                     
                     new_articles.append({
                         "date": target_date,
@@ -90,8 +78,8 @@ def update_db_and_ui(new_entries):
     
     json_payload = json.dumps(db)
 
-    # 構文エラーを避けるため f-string を使わずに定義
-    template = """
+    # 文字列の衝突を避けるため、シングルクォートのトリプルを使用し、外部変数として定義
+    html_template = '''
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -100,7 +88,7 @@ def update_db_and_ui(new_entries):
     <title>RT-TACTICAL | DATABASE</title>
     <style>
         :root { --bg: #05070a; --card: #0d1117; --accent: #f85149; --text: #c9d1d9; --border: #30363d; --green: #7ee787; }
-        body { margin:0; font-family:'Consolas', monospace; background:var(--bg); color:var(--text); overflow-x:hidden; }
+        body { margin:0; font-family:monospace; background:var(--bg); color:var(--text); overflow-x:hidden; }
         header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--border); padding:15px; z-index:100; }
         #search-box { width:100%; box-sizing:border-box; background:#000; border:1px solid var(--border); color:var(--green); padding:12px; border-radius:8px; font-size:16px; }
         main { padding:15px; padding-bottom:80px; }
@@ -109,4 +97,60 @@ def update_db_and_ui(new_entries):
         .attack-id { color:var(--accent); font-weight:bold; }
         #detail-view { position:fixed; top:0; right:-100%; width:100%; height:100%; background:var(--bg); transition: 0.3s; z-index:1000; overflow-y:auto; }
         #detail-view.open { right: 0; }
-        .detail-header { position:sticky; top:0; background:var(--card); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:
+        .detail-header { position:sticky; top:0; background:var(--card); padding:15px; border-bottom:1px solid var(--border); display:flex; align-items:center; }
+        .back-btn { font-size:1.5rem; background:none; border:none; color:var(--accent); cursor:pointer; margin-right:15px; }
+        .detail-content { padding:20px; white-space: pre-wrap; line-height: 1.6; }
+        pre { background:#000; padding:15px; border-radius:8px; border:1px solid #333; overflow-x:auto; position:relative; white-space: pre; }
+        .copy-btn { position:absolute; top:8px; right:8px; background:#21262d; color:#fff; border:0; padding:5px 10px; border-radius:4px; font-size:0.6rem; }
+    </style>
+</head>
+<body>
+    <header><input type="text" id="search-box" placeholder="Search Weapons..."></header>
+    <main id="article-list"></main>
+    <div id="detail-view">
+        <div class="detail-header"><button class="back-btn" onclick="closeDetail()">←</button><div id="header-title"></div></div>
+        <div class="detail-content" id="detail-body"></div>
+    </div>
+    <script>
+        const db = REPLACE_THIS_WITH_JSON;
+        function render() {
+            const q = document.getElementById('search-box').value.toLowerCase();
+            const list = document.getElementById('article-list');
+            list.innerHTML = '';
+            db.filter(a => (a.title + a.content).toLowerCase().includes(q)).reverse().forEach(a => {
+                const card = document.createElement('div');
+                card.className = 'article-card';
+                card.innerHTML = `<div class="meta"><span>${a.date}</span><span class="attack-id">${a.attack_id}</span></div><div style="font-weight:bold;">${a.title}</div>`;
+                card.onclick = () => openDetail(a);
+                list.appendChild(card);
+            });
+        }
+        function openDetail(a) {
+            document.getElementById('header-title').innerText = a.title;
+            document.getElementById('detail-body').innerHTML = a.content.replace(/\\n/g, '<br>');
+            document.querySelectorAll('pre').forEach(p => {
+                const b = document.createElement('button');
+                b.className = 'copy-btn'; b.innerText = 'COPY';
+                b.onclick = (e) => { e.stopPropagation(); navigator.clipboard.writeText(p.innerText.replace('COPY','')); b.innerText = 'DONE'; setTimeout(()=>b.innerText='COPY', 1500); };
+                p.appendChild(b);
+            });
+            document.getElementById('detail-view').classList.add('open');
+            window.history.pushState({details:true}, "");
+        }
+        function closeDetail() { document.getElementById('detail-view').classList.remove('open'); }
+        window.onpopstate = closeDetail;
+        document.getElementById('search-box').oninput = render;
+        render();
+    </script>
+</body>
+</html>
+'''
+    # 最終的な置換処理
+    final_html = html_template.replace("REPLACE_THIS_WITH_JSON", json_payload)
+    
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(final_html)
+
+if __name__ == "__main__":
+    new_data = fetch_and_analyze()
+    update_db_and_ui(new_data)
