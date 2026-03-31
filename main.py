@@ -1,17 +1,14 @@
 """
-RED-TACTICAL INTELLIGENCE AGENT v3.0
+RED-TACTICAL INTELLIGENCE AGENT v3.1
 =====================================
-v3.0 fixes & improvements:
-[CRITICAL] データ注入をJSONファイル分離方式に変更（HTMLへの直接埋め込みを廃止）
-[CRITICAL] deepseek-r1の<think>タグ対応を強化（貪欲マッチを非貪欲に修正）
-[CRITICAL] all_articles.json / index.htmlをGitHub Actionsで確実にコミットする想定に対応
-[QUALITY]  攻撃者視点への強制変換プロンプト（防御寄りソースも攻撃手順に落とし込む）
-[QUALITY]  コマンド例にフルオプション・ターゲット・パイプを必須化
-[QUALITY]  検索ソースをセキュリティ特化ドメインへ誘導するクエリ設計
-[QUALITY]  poc_url / cvss_score のバリデーション強化（"N/A"等を除外）
-[QUALITY]  タイトル重複チェックで実質的な重複記事を排除
-[UI]       summaryをHTML箇条書きで表示
-[UI]       スキャンライン・グリッド・グロー等のターミナル風UIに刷新
+v3.1 消費量最適化（品質維持）:
+[COST] search_depth: advanced(2cr) → basic(1cr) でTavilyクレジットを半減
+       月間消費: ~480cr → ~240cr  (無料枠1,000crに対して余裕あり)
+[COST] max_tokens: 4096 → 2000 でGroqトークン消費を約半減
+       日次消費: ~100,000tok → ~50,000tok
+[COST] 検索前にDBの既存URLをチェックし既知URLを除外してからLLM呼び出し
+[COST] 1カテゴリあたりのクエリ数を3→2本に削減（重複しやすい3本目を削除）
+       1回の実行上限: Tavily 16cr / Groq ~50,000tok
 """
 
 import os
@@ -34,7 +31,7 @@ groq_client = Groq(api_key=GROQ_KEY)
 MASTER_DATA      = "all_articles.json"
 OUTPUT_HTML      = "index.html"
 MAX_DB_ENTRIES   = 200
-MIN_REPORT_LEN   = 500    # 品質フィルタ
+MIN_REPORT_LEN   = 300    # 品質フィルタ（max_tokens削減に合わせて調整）
 MAX_RETRIES      = 3
 SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
@@ -45,25 +42,22 @@ FALLBACK_MODEL = "llama-3.3-70b-versatile"
 # 検索クエリ（セキュリティ研究ソースに誘導）
 # ─────────────────────────────────────────────
 SEARCH_CATEGORIES = {
+    # クエリ数を3→2に削減。最も技術情報が濃いクエリを優先して残す
     "MALWARE": [
-        "malware technical analysis shellcode loader evasion technique site:github.com OR site:securelist.com OR site:unit42.paloaltonetworks.com",
-        "new malware campaign persistence LOLBAS fileless 2026",
-        "RAT backdoor C2 communication protocol obfuscation analysis",
+        "malware technical analysis shellcode loader evasion persistence 2026",
+        "RAT backdoor C2 protocol obfuscation fileless LOLBAS",
     ],
     "INITIAL": [
         "CVE 2026 critical RCE exploit proof of concept published",
         "authentication bypass vulnerability exploit walkthrough writeup",
-        "zero day exploit initial access broker attack chain 2026",
     ],
     "POST_EXP": [
-        "Active Directory privilege escalation new technique kerberoasting RBCD 2026",
-        "EDR bypass AV evasion Windows technique 2026 writeup",
-        "lateral movement credential dumping LSASS new method",
+        "Active Directory privilege escalation kerberoasting RBCD EDR bypass 2026",
+        "lateral movement credential dumping LSASS new technique",
     ],
     "AI_SEC": [
         "LLM prompt injection jailbreak exploit technique 2026",
-        "MCP tool poisoning agentic AI attack vector 2026",
-        "AI red team attack adversarial machine learning exploit",
+        "MCP tool poisoning agentic AI attack vector security",
     ],
 }
 
@@ -181,7 +175,7 @@ def call_llm(prompt: str) -> dict | None:
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=4096,
+                    max_tokens=2000,  # 4096→2000 でGroqトークン消費を約半減
                     # json_objectモードはdeepseek-r1で不安定なため使用しない
                     # → プロンプトで制御し extract_json で取り出す
                 )
@@ -212,13 +206,14 @@ def title_hash(title: str) -> str:
 # ─────────────────────────────────────────────
 # 情報収集メイン
 # ─────────────────────────────────────────────
-def fetch_and_analyze() -> list[dict]:
+def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
     print("=" * 50)
-    print("  RED-INTEL AGENT v3.0 — 情報収集開始")
+    print("  RED-INTEL AGENT v3.1 — 情報収集開始")
     print("=" * 50)
+    print(f"  既存DB URL数: {len(existing_urls)} 件（スキップ対象）")
 
     new_articles: list[dict] = []
-    seen_urls    = set()
+    seen_urls         = set(existing_urls)   # 既存URLも重複チェックに含める
     seen_title_hashes = set()
 
     for cat_id, queries in SEARCH_CATEGORIES.items():
@@ -229,7 +224,7 @@ def fetch_and_analyze() -> list[dict]:
             try:
                 results = tavily.search(
                     query=query,
-                    search_depth="advanced",
+                    search_depth="basic",       # advanced(2cr)→basic(1cr) でTavily消費半減
                     max_results=MAX_RESULTS_PER_QUERY,
                     search_period="week",
                 )["results"]
@@ -292,15 +287,18 @@ def fetch_and_analyze() -> list[dict]:
 # ─────────────────────────────────────────────
 # DB更新
 # ─────────────────────────────────────────────
-def update_db(new_entries: list[dict]) -> list[dict]:
-    db: list[dict] = []
+def load_db() -> list[dict]:
+    """DBを読み込んで返す。存在しない場合は空リスト。"""
     if os.path.exists(MASTER_DATA):
         try:
             with open(MASTER_DATA, "r", encoding="utf-8") as f:
-                db = json.load(f)
+                return json.load(f)
         except Exception:
-            db = []
+            pass
+    return []
 
+
+def update_db(db: list[dict], new_entries: list[dict]) -> list[dict]:
     existing_urls = {a["url"] for a in db}
     added = 0
     for entry in new_entries:
@@ -1062,6 +1060,8 @@ init();
 # Entry point
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    new_data = fetch_and_analyze()
-    db = update_db(new_data)
+    db = load_db()
+    existing_urls = {a["url"] for a in db}
+    new_data = fetch_and_analyze(existing_urls)
+    db = update_db(db, new_data)
     generate_html(db)
