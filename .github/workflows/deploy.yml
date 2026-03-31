@@ -1,31 +1,43 @@
-name: Deploy Daily Intel Page
+name: RT-Intel Daily Update
+
 on:
   schedule:
-    - cron: '0 0 * * *' # 毎日日本時間 9:00
-  workflow_dispatch:
+    # 毎日 JST 06:00 (UTC 21:00) に実行
+    - cron: '0 21 * * *'
+  workflow_dispatch:   # 手動実行も可能
+
+permissions:
+  contents: write      # コミット・プッシュに必要
 
 jobs:
-  build-and-deploy:
+  update-intel:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # ページ更新のために書き込み権限が必要
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          python-version: '3.10'
+          # GitHub Pages用ブランチを使っている場合は branch: gh-pages に変更
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install dependencies
         run: pip install tavily-python groq
-      - name: Run AI Agent
+
+      - name: Run intel agent
         env:
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
         run: python main.py
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          publish_branch: gh-pages # 公開専用のブランチ
-          keep_files: true
+
+      - name: Commit and push updated files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add all_articles.json articles.js index.html
+          # 変更がない場合はコミットしない（エラー回避）
+          git diff --staged --quiet || git commit -m "chore: update intel feed $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
