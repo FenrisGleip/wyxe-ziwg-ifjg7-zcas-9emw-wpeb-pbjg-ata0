@@ -44,12 +44,17 @@ def fetch_and_analyze():
                 URL: {item['url']}
                 Content: {item['content'][:9000]}
                 """
-                
+                # モデルを 8b に変更（高速かつリミットが緩い）
                 response = groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model="llama-3.1-8b-instant", 
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.0
                 )
+                #response = groq.chat.completions.create(
+                #    model="llama-3.3-70b-versatile",
+                #    messages=[{"role": "user", "content": prompt}],
+                #    temperature=0.0
+                #)
                 res_text = response.choices[0].message.content
                 if "SKIP" in res_text[:10]: continue
 
