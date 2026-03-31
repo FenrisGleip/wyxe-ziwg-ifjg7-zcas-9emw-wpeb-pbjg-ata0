@@ -941,12 +941,10 @@ init();
 </script>
 </body>
 </html>"""
-    with open("index.html", "w", encoding="utf-8") as f:
-        f.write(index_html)
-    print("HTML書き出し: index.html")
 
-    # ── log.html ─────────────────────────────────
-    log_html = """<!DOCTYPE html>
+
+def _build_log_html() -> str:
+    return """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -974,10 +972,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 .page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);
   letter-spacing:.1em;text-shadow:0 0 20px rgba(61,255,160,.25)}
 .page-sub{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.15em;margin-top:4px}
-.summary-row{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:10px;
-  margin-bottom:24px;
-}
+.summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
 .stat-card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:14px;text-align:center}
 .stat-card-val{font-family:var(--disp);font-size:1.6rem;font-weight:700;color:var(--acc);
   text-shadow:0 0 10px rgba(61,255,160,.25);display:block}
@@ -1021,48 +1016,32 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
 <script>
 const log = (window.__RUN_LOG__ || []).slice().reverse();
 const today = new Date().toISOString().slice(0,10);
-
-// summary
-const totalRuns   = log.length;
-const totalNew    = log.reduce((s,r)=>s+(r.new_articles||0),0);
-const lastRun     = log[0]?.datetime_jst || '—';
-const summaryEl   = document.getElementById('summary-row');
-summaryEl.innerHTML = `
+const totalRuns = log.length;
+const totalNew  = log.reduce((s,r)=>s+(r.new_articles||0),0);
+const lastRun   = log[0]?.datetime_jst || '—';
+document.getElementById('summary-row').innerHTML = `
   <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">TOTAL RUNS</div></div>
   <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES COLLECTED</div></div>
   <div class="stat-card"><span class="stat-card-val" style="font-size:1rem;padding-top:4px">${lastRun}</span><div class="stat-card-lbl">LAST RUN (JST)</div></div>`;
-
-// table
 const wrap = document.getElementById('log-wrap');
 if(!log.length){
   wrap.innerHTML='<div class="no-log">// 実行ログがありません</div>';
 } else {
-  let rows = log.map(r=>{
-    const isToday = r.datetime_jst?.startsWith(today);
-    const newBadge = r.new_articles > 0
-      ? `<span class="badge-new">+${r.new_articles}</span>`
-      : `<span class="badge-zero">±0</span>`;
-    return `<tr class="${isToday?'today-row':''}">
-      <td>${r.datetime_jst}${isToday?'<span class="badge-new" style="margin-left:6px">TODAY</span>':''}</td>
-      <td>${newBadge}</td>
-      <td>${r.total_articles ?? '—'}</td>
-    </tr>`;
-  }).join('');
   wrap.innerHTML = `<table class="log-table">
     <thead><tr><th>実行日時 (JST)</th><th>新規取得</th><th>累計件数</th></tr></thead>
-    <tbody>${rows}</tbody>
+    <tbody>${log.map(r=>{
+      const isToday=r.datetime_jst?.startsWith(today);
+      const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:`<span class="badge-zero">±0</span>`;
+      return `<tr class="${isToday?'today-row':''}">
+        <td>${r.datetime_jst}${isToday?'<span class="badge-new" style="margin-left:6px">TODAY</span>':''}</td>
+        <td>${nb}</td><td>${r.total_articles??'—'}</td></tr>`;
+    }).join('')}</tbody>
   </table>`;
 }
 </script>
 </body>
 </html>"""
-    with open("log.html", "w", encoding="utf-8") as f:
-        f.write(log_html)
-    print("HTML書き出し: log.html")
-    print("※ GitHub Actions で index.html / log.html / articles.js / log.js をコミットしてください")
 
-
-# ─────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
