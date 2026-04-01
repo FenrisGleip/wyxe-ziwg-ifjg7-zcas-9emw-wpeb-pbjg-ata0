@@ -1000,7 +1000,7 @@ async function postToTeams(article){
 
   const cvssText = article.cvss_score ? ' | CVSS ' + article.cvss_score : '';
   const mitreText = (article.mitre_ids||[]).slice(0,3).join(', ');
-  const summary = (article.summary_points||[]).map(function(p){ return '\u2022 '+p; }).join('\n');
+  const summary = (article.summary_points||[]).map(function(p){ return '\u2022 '+p; }).join('\\n');
 
   const payload = {
     type: 'message',
