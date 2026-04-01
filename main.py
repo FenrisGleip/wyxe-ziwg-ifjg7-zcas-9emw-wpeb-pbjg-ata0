@@ -1,5 +1,4 @@
 # RED-TACTICAL INTELLIGENCE AGENT v3.1
-
 import os
 import json
 import re
@@ -10,148 +9,130 @@ from groq import Groq
 from datetime import datetime
 
 # ─────────────────────────────────────────────
-
 # 設定
-
 # ─────────────────────────────────────────────
-
-TAVILY_KEY  = os.getenv(“TAVILY_API_KEY”)
-GROQ_KEY    = os.getenv(“GROQ_API_KEY”)
+TAVILY_KEY  = os.getenv("TAVILY_API_KEY")
+GROQ_KEY    = os.getenv("GROQ_API_KEY")
 tavily      = TavilyClient(api_key=TAVILY_KEY)
 groq_client = Groq(api_key=GROQ_KEY)
 
-MASTER_DATA      = “all_articles.json”
-OUTPUT_HTML      = “index.html”
+MASTER_DATA      = "all_articles.json"
+OUTPUT_HTML      = "index.html"
 MAX_DB_ENTRIES   = 200
 MIN_REPORT_LEN   = 1200   # 品質フィルタ（高品質レポート重視）
 MAX_RETRIES      = 3
 SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 
 # deepseek-r1-distill-llama-70b は2025年9月に廃止済み
-
 # llama-4-scout: TPD 500,000 (llama-3.3-70b-versatileの5倍) で余裕あり
-
-PRIMARY_MODEL  = “meta-llama/llama-4-scout-17b-16e-instruct”
-FALLBACK_MODEL = “llama-3.1-8b-instant”   # TPD 500,000、速度重視
+PRIMARY_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
+FALLBACK_MODEL = "llama-3.1-8b-instant"   # TPD 500,000、速度重視
 
 # ─────────────────────────────────────────────
-
 # 検索クエリ（セキュリティ研究ソースに誘導）
-
 # ─────────────────────────────────────────────
-
 # クエリ1本に集約。候補を多く取って厳選する方針（量より質）
-
 SEARCH_CATEGORIES = {
-“MALWARE”:  [“novel malware technical analysis loader shellcode evasion EDR bypass 2026”],
-“INITIAL”:  [“CVE 2026 exploit proof of concept RCE new vulnerability writeup”],
-“POST_EXP”: [“new post exploitation technique Active Directory privilege escalation EDR bypass 2026”],
-“AI_SEC”:   [“novel LLM AI agent attack technique jailbreak prompt injection MCP 2026”],
+    "MALWARE":  ["novel malware technical analysis loader shellcode evasion EDR bypass 2026"],
+    "INITIAL":  ["CVE 2026 exploit proof of concept RCE new vulnerability writeup"],
+    "POST_EXP": ["new post exploitation technique Active Directory privilege escalation EDR bypass 2026"],
+    "AI_SEC":   ["novel LLM AI agent attack technique jailbreak prompt injection MCP 2026"],
 }
 
 # 候補を多めに取得し、LLMの新規性フィルタで厳選する
-
 MAX_RESULTS_PER_QUERY = 5  # 候補を多く取り新規性フィルタで厳選
 
 # ─────────────────────────────────────────────
-
 # プロンプト（レッドチーム再現手順特化）
-
 # ─────────────────────────────────────────────
-
 CATEGORY_CONTEXT = {
-“MALWARE”: “””
+    "MALWARE": """
 MALWARE ANALYSIS FOCUS:
-
 - Internal loader mechanism: how shellcode/PE is decrypted, mapped, executed (specific API calls: VirtualAlloc, WriteProcessMemory, CreateRemoteThread etc.)
 - Obfuscation: exact algorithm (XOR key, RC4, AES-CBC with IV), where key material is stored
 - C2 protocol: HTTP/DNS/custom, beaconing interval, jitter, encoding (base64/custom), URI patterns
 - Persistence: exact registry key path, scheduled task XML, WMI subscription query
 - EDR evasion: AMSI bypass method, ETW patching, direct syscalls, process hollowing target
-  INITIAL ACCESS FOCUS:
+INITIAL ACCESS FOCUS:
 - Root cause: exact vulnerable code path, which parameter/header/field triggers the bug
 - Vulnerability class: buffer overflow offset, SQL injection context, deserialization gadget chain, auth logic bypass condition
 - Affected versions: exact version strings, patch commit/advisory reference
 - Exploit trigger: HTTP method, endpoint path, required headers/auth state, payload format
 - Bypass conditions: WAF bypass, auth prerequisite, race condition window
-  “””,
-  “POST_EXP”: “””
-  POST-EXPLOITATION FOCUS:
+""",
+    "POST_EXP": """
+POST-EXPLOITATION FOCUS:
 - Privilege escalation: specific misconfiguration (SeImpersonatePrivilege, weak service ACL, unquoted path, token abuse)
 - Lateral movement: exact protocol (SMB/WinRM/DCOM), credential type needed, required ports
 - Credential dumping: LSASS access method (MiniDump, direct read, PPL bypass), SAM/NTDS extraction path
 - AD attack: Kerberoastable SPN list method, RBCD prerequisite, DCSync required rights
 - EDR evasion: process to inject into, which LOLBAS binary, obfuscation needed
-  “””,
-  “AI_SEC”: “””
-  AI/LLM ATTACK FOCUS:
+""",
+    "AI_SEC": """
+AI/LLM ATTACK FOCUS:
 - Attack vector: exact injection point (system prompt, tool description, RAG content, user input)
 - Payload mechanism: why the model follows malicious instruction (context confusion, role override, indirect injection)
 - Concrete payload examples: actual strings/templates that trigger the behavior
 - Impact: what attacker-controlled action is executed (exfiltration, SSRF, tool misuse)
 - Bypass technique: how safety filters are circumvented
-  “””,
-  }
+""",
+}
 
 def build_prompt(content: str, category: str) -> str:
-ctx = CATEGORY_CONTEXT.get(category, “”)
-return f””“You are a senior red team operator with 15 years of offensive security experience writing an INTERNAL technical reproduction report.
+    ctx = CATEGORY_CONTEXT.get(category, "")
+    return f"""You are a senior red team operator with 15 years of offensive security experience writing an INTERNAL technical reproduction report.
 
 AUDIENCE: Red team testers who need to reproduce this attack in a lab environment TODAY. Zero tolerance for vague descriptions.
 {ctx}
 ━━━ STEP 1: NOVELTY SCREENING (do this first, silently) ━━━
 Rate the source article novelty 1-5:
-5 = New technique/CVE/tool, original research, new bypass not widely known
-4 = Recent variant of known technique with meaningful new element
-3 = Known technique with specific target/context details worth documenting
-2 = General overview of existing technique, no new information
-1 = Generic educational content, vendor marketing, no technical depth
+  5 = New technique/CVE/tool, original research, new bypass not widely known
+  4 = Recent variant of known technique with meaningful new element
+  3 = Known technique with specific target/context details worth documenting
+  2 = General overview of existing technique, no new information
+  1 = Generic educational content, vendor marketing, no technical depth
 
 If novelty score is 1, 2, or 3: output ONLY this JSON:
-{{“skip”: true, “reason”: “新規性が低い記事のため除外（スコア3以下）”}}
+{{"skip": true, "reason": "新規性が低い記事のため除外（スコア3以下）"}}
 
 If novelty score is 4 or 5: write the COMPLETE report below. DO NOT truncate any section.
 
 ━━━ STEP 2: FULL REPORT ━━━
 
-CRITICAL: Every section must be FULLY written. Never end a section with “…” or mid-sentence.
+CRITICAL: Every section must be FULLY written. Never end a section with "..." or mid-sentence.
 If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Never cut other sections short.
 
 [## 概要]
-
 - 3〜5文で技術的要点を簡潔にまとめる
 - 末尾に必ず以下のフォーマットで新規性を記載（改行して独立した段落にすること）:
-  
+
   **🆕 新規性・差異化ポイント:** 従来のXXX攻撃との具体的な差異を1〜2文で記述。
-  例: “**🆕 新規性・差異化ポイント:** 従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である。”
+  例: "**🆕 新規性・差異化ポイント:** 従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である。"
   情報不足の場合は既知手法との差異を推定して末尾に [推測] を付与
 
 [## 脆弱性・脅威の技術的メカニズム]
-
 - ROOT CAUSEを技術的深度で説明（APIコール名・メモリレイアウト・プロトコルフィールド・コードパス）
 - CVEの場合: 脆弱なコードパス・トリガー条件・パッチ差分
 - マルウェアの場合: 復号→マッピング→実行の内部フロー
 - 最低200ワード。表面的な説明は不可
 
 [## 再現手順（レッドチームテスター向け）]
-
 - 番号付きチェックリスト形式
-- 各ステップは具体的アクション（“ツールXをインストール”、“Yフラグ付きでZを実行”）
+- 各ステップは具体的アクション（"ツールXをインストール"、"Yフラグ付きでZを実行"）
 - ラボ環境要件・ターゲット前提条件・必要権限を含む
 - 情報不足は知識から補完して [推測] を付与
-- “攻撃者がXをする”禁止。“1. リスナーを立てる: …“形式
+- "攻撃者がXをする"禁止。"1. リスナーを立てる: ..."形式
 - 記事内で言及されたテクニック（例: COMハイジャック、ステガノグラフィー、特定のCLSIDへの書き込みなど）は
   その作成・実装方法を再現手順に必ず含めること。
-  “XというテクニックをYに対して使う”という記述があれば、
+  "XというテクニックをYに対して使う"という記述があれば、
   Xの実装コード・設定手順・必要なツールを具体的に書く
 
 [## 実行コマンド・再現コード]
-
 - コマンドは完全で実行可能。プレースホルダー: IP=192.168.1.10, ドメイン=CORP.LOCAL
 - 記事に登場するコード・スクリプト・ペイロードを必ず再現して記載
 - PoCやエクスプロイトコードがある場合はPython/Bash等の実装例を示す
 - BAD: impacket-secretsdump domain/user@target
-- GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:‘P@ssw0rd’@192.168.1.10 -outputfile /tmp/hashes.txt
+- GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:'P@ssw0rd'@192.168.1.10 -outputfile /tmp/hashes.txt
 
 [## MITRE ATT&CK マッピング]
 サブテクニックIDまで記載（例: T1055.012）
@@ -159,313 +140,284 @@ If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Neve
 [## 検知シグネチャ・緩和策]
 最低1つの具体的な検知ルール（Sigma/YARA/KQLスニペット推奨）
 
-OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \n for newlines.
+OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \\n for newlines.
 
-Skip: {{“skip”: true, “reason”: “理由”}}
+Skip: {{"skip": true, "reason": "理由"}}
 
-Full: {{“title”:“日本語ニュース見出し30字以内”,“summary_points”:[“技術的要点1”,“技術的要点2”,“技術的要点3”],“poc_url”:“GitHubのURLか空文字”,“cvss_score”:“数値のみか空文字”,“mitre_ids”:[“T1055.012”],“report”:”## 概要\n…\n## 脆弱性・脅威の技術的メカニズム\n…\n## 再現手順（レッドチームテスター向け）\n1. …\n## 実行コマンド・再現コード\n`bash\\n...\\n`\n## MITRE ATT&CK マッピング\n…\n## 検知シグネチャ・緩和策\n`\\n...\\n`”}}
+Full: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n...\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド・再現コード\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知シグネチャ・緩和策\\n```\\n...\\n```"}}
 
 SOURCE ARTICLE:
-{content[:8000]}”””
+{content[:8000]}"""
 
 # ─────────────────────────────────────────────
-
 # JSON抽出（deepseek-r1の<think>対応を強化）
-
 # ─────────────────────────────────────────────
-
 def extract_json(raw: str) -> dict | None:
-# <think>…</think> を非貪欲マッチで除去（ネスト・複数ブロック対応）
-cleaned = re.sub(r”<think>.*?</think>”, “”, raw, flags=re.DOTALL)
-cleaned = cleaned.strip()
+    # <think>...</think> を非貪欲マッチで除去（ネスト・複数ブロック対応）
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    cleaned = cleaned.strip()
 
-```
-# ```json ... ``` または ``` ... ``` ブロックを除去
-cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-cleaned = re.sub(r"\s*```$", "", cleaned)
-cleaned = cleaned.strip()
+    # ```json ... ``` または ``` ... ``` ブロックを除去
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    cleaned = cleaned.strip()
 
-# パターン1: そのままパース
-try:
-    return json.loads(cleaned)
-except json.JSONDecodeError:
-    pass
-
-# パターン2: 最初の { から最後の } まで抽出（外側のテキストを無視）
-brace_start = cleaned.find("{")
-brace_end   = cleaned.rfind("}")
-if brace_start != -1 and brace_end > brace_start:
+    # パターン1: そのままパース
     try:
-        return json.loads(cleaned[brace_start:brace_end+1])
+        return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-return None
-```
+    # パターン2: 最初の { から最後の } まで抽出（外側のテキストを無視）
+    brace_start = cleaned.find("{")
+    brace_end   = cleaned.rfind("}")
+    if brace_start != -1 and brace_end > brace_start:
+        try:
+            return json.loads(cleaned[brace_start:brace_end+1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
 
 def validate_result(res: dict) -> bool:
-“”“品質フィルタ: 必須フィールドと最低品質チェック”””
-if not res:
-return False
-# 新規性スコアが低い記事はskipフラグで除外
-if res.get(“skip”):
-return False
-if not res.get(“title”) or len(res[“title”]) < 5:
-return False
-if not res.get(“report”) or len(res[“report”]) < MIN_REPORT_LEN:
-return False
-# LLMがpoc_urlに “なし” “N/A” “none” 等を入れた場合は空文字に正規化
-poc = res.get(“poc_url”, “”)
-if poc and not poc.startswith(“http”):
-res[“poc_url”] = “”
-# cvss_scoreが数値でなければ空文字に正規化
-cvss = res.get(“cvss_score”, “”)
-if cvss:
-try:
-float(cvss)
-except ValueError:
-res[“cvss_score”] = “”
-return True
-
-# ─────────────────────────────────────────────
-
-# LLM呼び出し（モデルフォールバック付きリトライ）
-
-# ─────────────────────────────────────────────
-
-def call_llm(prompt: str) -> dict | None:
-for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
-for attempt in range(MAX_RETRIES):
-try:
-resp = groq_client.chat.completions.create(
-model=model,
-messages=[{“role”: “user”, “content”: prompt}],
-temperature=0.1,
-max_tokens=4096,  # 記事が途中で切れないよう最大値に設定
-# json_objectモードはdeepseek-r1で不安定なため使用しない
-# → プロンプトで制御し extract_json で取り出す
-)
-raw = resp.choices[0].message.content
-result = extract_json(raw)
-
-```
-            if result and validate_result(result):
-                print(f"    ✓ [{model}] attempt {attempt+1} — OK")
-                return result
-
-            if result and result.get("skip"):
-                print(f"    ✗ [{model}] 新規性なし — {result.get('reason','')}")
-                return None  # skipは即座に終了、リトライ不要
-
-            print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足, retry...")
-            time.sleep(2)
-
-        except Exception as e:
-            print(f"    ✗ [{model}] attempt {attempt+1} — {e}")
-            time.sleep(3)
-
-return None
-```
-
-# ─────────────────────────────────────────────
-
-# 重複チェック（URLとタイトル類似度）
-
-# ─────────────────────────────────────────────
-
-def title_hash(title: str) -> str:
-“”“タイトルを正規化してハッシュ化（表記ゆれを吸収）”””
-normalized = re.sub(r”[^\w]”, “”, title).lower()
-return hashlib.md5(normalized.encode()).hexdigest()[:8]
-
-# ─────────────────────────────────────────────
-
-# 情報収集メイン
-
-# ─────────────────────────────────────────────
-
-def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
-print(”=” * 50)
-print(”  RED-INTEL AGENT v3.1 — 情報収集開始”)
-print(”=” * 50)
-print(f”  既存DB URL数: {len(existing_urls)} 件（スキップ対象）”)
-
-```
-new_articles: list[dict] = []
-seen_urls         = set(existing_urls)   # 既存URLも重複チェックに含める
-seen_title_hashes = set()
-
-for cat_id, queries in SEARCH_CATEGORIES.items():
-    print(f"\n[{cat_id}] ───────────────────────")
-    cat_count = 0
-
-    for query in queries:
-        # 上限なし: 新規性スコア4-5の記事はすべて採用
+    """品質フィルタ: 必須フィールドと最低品質チェック"""
+    if not res:
+        return False
+    # 新規性スコアが低い記事はskipフラグで除外
+    if res.get("skip"):
+        return False
+    if not res.get("title") or len(res["title"]) < 5:
+        return False
+    if not res.get("report") or len(res["report"]) < MIN_REPORT_LEN:
+        return False
+    # LLMがpoc_urlに "なし" "N/A" "none" 等を入れた場合は空文字に正規化
+    poc = res.get("poc_url", "")
+    if poc and not poc.startswith("http"):
+        res["poc_url"] = ""
+    # cvss_scoreが数値でなければ空文字に正規化
+    cvss = res.get("cvss_score", "")
+    if cvss:
         try:
-            results = tavily.search(
-                query=query,
-                search_depth="advanced",
-                max_results=MAX_RESULTS_PER_QUERY,
-                search_period="week",
-            )["results"]
-
-            # スコアでソート（Tavilyのscoreが高い順 = より関連性が高い）
-            results.sort(key=lambda x: x.get("score", 0), reverse=True)
-
-            for item in results:
-                url     = item.get("url", "")
-                content = item.get("content", "")
-
-                # 重複URL
-                if url in seen_urls:
-                    continue
-                seen_urls.add(url)
-
-                # コンテンツ不足スキップ
-                if len(content) < 600:
-                    print(f"  skip (short content): {url[:60]}")
-                    continue
-
-                print(f"  → {url[:70]}")
-
-                prompt = build_prompt(content, cat_id)
-                result = call_llm(prompt)
-
-                if result is None:
-                    print(f"    ✗ 解析失敗 — skip")
-                    continue
-
-                # タイトル重複チェック
-                th = title_hash(result["title"])
-                if th in seen_title_hashes:
-                    print(f"    ✗ タイトル重複 — skip: {result['title'][:40]}")
-                    continue
-                seen_title_hashes.add(th)
-
-                new_articles.append({
-                    "date":         datetime.now().strftime("%Y-%m-%d"),
-                    "category":     cat_id,
-                    "title":        result["title"],
-                    "summary_points": result.get("summary_points", []),
-                    "poc_url":      result.get("poc_url", ""),
-                    "cvss_score":   result.get("cvss_score", ""),
-                    "mitre_ids":    result.get("mitre_ids", []),
-                    "content":      result["report"],
-                    "url":          url,
-                })
-                cat_count += 1
-                time.sleep(SLEEP_BETWEEN_REQ)
-
-        except Exception as e:
-            print(f"  ✗ Tavily検索エラー ({query[:40]}): {e}")
-            continue
-
-    print(f"  [{cat_id}] {cat_count} 件取得")
-
-print(f"\n{'='*50}")
-print(f"  完了: 合計 {len(new_articles)} 件")
-print(f"{'='*50}")
-return new_articles
-```
+            float(cvss)
+        except ValueError:
+            res["cvss_score"] = ""
+    return True
 
 # ─────────────────────────────────────────────
+# LLM呼び出し（モデルフォールバック付きリトライ）
+# ─────────────────────────────────────────────
+def call_llm(prompt: str) -> dict | None:
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        for attempt in range(MAX_RETRIES):
+            try:
+                resp = groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=4096,  # 記事が途中で切れないよう最大値に設定
+                    # json_objectモードはdeepseek-r1で不安定なため使用しない
+                    # → プロンプトで制御し extract_json で取り出す
+                )
+                raw = resp.choices[0].message.content
+                result = extract_json(raw)
 
+                if result and validate_result(result):
+                    print(f"    ✓ [{model}] attempt {attempt+1} — OK")
+                    return result
+
+                if result and result.get("skip"):
+                    print(f"    ✗ [{model}] 新規性なし — {result.get('reason','')}")
+                    return None  # skipは即座に終了、リトライ不要
+
+                print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足, retry...")
+                time.sleep(2)
+
+            except Exception as e:
+                print(f"    ✗ [{model}] attempt {attempt+1} — {e}")
+                time.sleep(3)
+
+    return None
+
+# ─────────────────────────────────────────────
+# 重複チェック（URLとタイトル類似度）
+# ─────────────────────────────────────────────
+def title_hash(title: str) -> str:
+    """タイトルを正規化してハッシュ化（表記ゆれを吸収）"""
+    normalized = re.sub(r"[^\w]", "", title).lower()
+    return hashlib.md5(normalized.encode()).hexdigest()[:8]
+
+# ─────────────────────────────────────────────
+# 情報収集メイン
+# ─────────────────────────────────────────────
+def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
+    print("=" * 50)
+    print("  RED-INTEL AGENT v3.1 — 情報収集開始")
+    print("=" * 50)
+    print(f"  既存DB URL数: {len(existing_urls)} 件（スキップ対象）")
+
+    new_articles: list[dict] = []
+    seen_urls         = set(existing_urls)   # 既存URLも重複チェックに含める
+    seen_title_hashes = set()
+
+    for cat_id, queries in SEARCH_CATEGORIES.items():
+        print(f"\n[{cat_id}] ───────────────────────")
+        cat_count = 0
+
+        for query in queries:
+            # 上限なし: 新規性スコア4-5の記事はすべて採用
+            try:
+                results = tavily.search(
+                    query=query,
+                    search_depth="advanced",
+                    max_results=MAX_RESULTS_PER_QUERY,
+                    search_period="week",
+                )["results"]
+
+                # スコアでソート（Tavilyのscoreが高い順 = より関連性が高い）
+                results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+                for item in results:
+                    url     = item.get("url", "")
+                    content = item.get("content", "")
+
+                    # 重複URL
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+
+                    # コンテンツ不足スキップ
+                    if len(content) < 600:
+                        print(f"  skip (short content): {url[:60]}")
+                        continue
+
+                    print(f"  → {url[:70]}")
+
+                    prompt = build_prompt(content, cat_id)
+                    result = call_llm(prompt)
+
+                    if result is None:
+                        print(f"    ✗ 解析失敗 — skip")
+                        continue
+
+                    # タイトル重複チェック
+                    th = title_hash(result["title"])
+                    if th in seen_title_hashes:
+                        print(f"    ✗ タイトル重複 — skip: {result['title'][:40]}")
+                        continue
+                    seen_title_hashes.add(th)
+
+                    new_articles.append({
+                        "date":         datetime.now().strftime("%Y-%m-%d"),
+                        "category":     cat_id,
+                        "title":        result["title"],
+                        "summary_points": result.get("summary_points", []),
+                        "poc_url":      result.get("poc_url", ""),
+                        "cvss_score":   result.get("cvss_score", ""),
+                        "mitre_ids":    result.get("mitre_ids", []),
+                        "content":      result["report"],
+                        "url":          url,
+                    })
+                    cat_count += 1
+                    time.sleep(SLEEP_BETWEEN_REQ)
+
+            except Exception as e:
+                print(f"  ✗ Tavily検索エラー ({query[:40]}): {e}")
+                continue
+
+        print(f"  [{cat_id}] {cat_count} 件取得")
+
+    print(f"\n{'='*50}")
+    print(f"  完了: 合計 {len(new_articles)} 件")
+    print(f"{'='*50}")
+    return new_articles
+
+# ─────────────────────────────────────────────
 # DB更新
-
 # ─────────────────────────────────────────────
-
 def load_db() -> list[dict]:
-“”“DBを読み込んで返す。存在しない場合は空リスト。”””
-if os.path.exists(MASTER_DATA):
-try:
-with open(MASTER_DATA, “r”, encoding=“utf-8”) as f:
-return json.load(f)
-except Exception:
-pass
-return []
+    """DBを読み込んで返す。存在しない場合は空リスト。"""
+    if os.path.exists(MASTER_DATA):
+        try:
+            with open(MASTER_DATA, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
 
 def update_db(db: list[dict], new_entries: list[dict]) -> list[dict]:
-existing_urls = {a[“url”] for a in db}
-added = 0
-for entry in new_entries:
-if entry[“url”] not in existing_urls:
-db.append(entry)
-added += 1
+    existing_urls = {a["url"] for a in db}
+    added = 0
+    for entry in new_entries:
+        if entry["url"] not in existing_urls:
+            db.append(entry)
+            added += 1
 
-```
-db = sorted(db, key=lambda x: x["date"], reverse=True)[:MAX_DB_ENTRIES]
+    db = sorted(db, key=lambda x: x["date"], reverse=True)[:MAX_DB_ENTRIES]
 
-with open(MASTER_DATA, "w", encoding="utf-8") as f:
-    json.dump(db, f, ensure_ascii=False, indent=2)
+    with open(MASTER_DATA, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False, indent=2)
 
-print(f"DB: {added} 件追加 / 合計 {len(db)} 件 → {MASTER_DATA}")
-return db
-```
+    print(f"DB: {added} 件追加 / 合計 {len(db)} 件 → {MASTER_DATA}")
+    return db
+
 
 # ─────────────────────────────────────────────
-
 # 実行ログ管理
-
 # ─────────────────────────────────────────────
-
-RUN_LOG_FILE = “run_log.json”
+RUN_LOG_FILE = "run_log.json"
 
 def load_run_log() -> list[dict]:
-if os.path.exists(RUN_LOG_FILE):
-try:
-with open(RUN_LOG_FILE, “r”, encoding=“utf-8”) as f:
-return json.load(f)
-except Exception:
-pass
-return []
+    if os.path.exists(RUN_LOG_FILE):
+        try:
+            with open(RUN_LOG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
 
 def append_run_log(run_log: list[dict], new_articles_count: int, total_count: int) -> list[dict]:
-entry = {
-“datetime_jst”: datetime.now().strftime(”%Y-%m-%d %H:%M”),
-“new_articles”:  new_articles_count,
-“total_articles”: total_count,
-}
-run_log.append(entry)
-run_log = run_log[-90:]  # 直近90件のみ保持
-with open(RUN_LOG_FILE, “w”, encoding=“utf-8”) as f:
-json.dump(run_log, f, ensure_ascii=False, indent=2)
-return run_log
+    entry = {
+        "datetime_jst": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "new_articles":  new_articles_count,
+        "total_articles": total_count,
+    }
+    run_log.append(entry)
+    run_log = run_log[-90:]  # 直近90件のみ保持
+    with open(RUN_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(run_log, f, ensure_ascii=False, indent=2)
+    return run_log
 
 # ─────────────────────────────────────────────
-
 # HTML生成（index.html + log.html）
-
 # ─────────────────────────────────────────────
-
 def generate_html(db: list[dict], run_log: list[dict]) -> None:
-# ── articles.js ──────────────────────────────
-with open(“articles.js”, “w”, encoding=“utf-8”) as f:
-f.write(“window.**ARTICLES** = “ + json.dumps(db, ensure_ascii=False) + “;”)
-print(“データ書き出し: articles.js”)
+    # ── articles.js ──────────────────────────────
+    with open("articles.js", "w", encoding="utf-8") as f:
+        f.write("window.__ARTICLES__ = " + json.dumps(db, ensure_ascii=False) + ";")
+    print("データ書き出し: articles.js")
 
-```
-# ── log.js ───────────────────────────────────
-with open("log.js", "w", encoding="utf-8") as f:
-    f.write("window.__RUN_LOG__ = " + json.dumps(run_log, ensure_ascii=False) + ";")
-print("ログ書き出し: log.js")
+    # ── log.js ───────────────────────────────────
+    with open("log.js", "w", encoding="utf-8") as f:
+        f.write("window.__RUN_LOG__ = " + json.dumps(run_log, ensure_ascii=False) + ";")
+    print("ログ書き出し: log.js")
 
-# ── index.html ───────────────────────────────
-index_html = _build_index_html()
-with open("index.html", "w", encoding="utf-8") as f:
-    f.write(index_html)
-print("HTML書き出し: index.html")
+    # ── index.html ───────────────────────────────
+    index_html = _build_index_html()
+    with open("index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+    print("HTML書き出し: index.html")
 
-# ── log.html ─────────────────────────────────
-log_html = _build_log_html()
-with open("log.html", "w", encoding="utf-8") as f:
-    f.write(log_html)
-print("HTML書き出し: log.html")
-print("※ GitHub Actions で index.html / log.html / articles.js / log.js をコミットしてください")
-```
+    # ── log.html ─────────────────────────────────
+    log_html = _build_log_html()
+    with open("log.html", "w", encoding="utf-8") as f:
+        f.write(log_html)
+    print("HTML書き出し: log.html")
+    print("※ GitHub Actions で index.html / log.html / articles.js / log.js をコミットしてください")
+
 
 def _build_index_html() -> str:
-return “””<!DOCTYPE html>
-
+    return """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -500,144 +452,144 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
 /* noise overlay removed for scroll performance */
 
 /* ════════════════════════════════
-DESKTOP LAYOUT
+   DESKTOP LAYOUT
 ════════════════════════════════ */
 .layout{display:flex;height:100vh;overflow:hidden}
 
 /* ── Sidebar (desktop) ── */
 .sidebar{
-width:240px;flex-shrink:0;
-background:var(–surf);
-border-right:1px solid var(–bdr);
-display:flex;flex-direction:column;
-position:relative;z-index:10;
+  width:240px;flex-shrink:0;
+  background:var(--surf);
+  border-right:1px solid var(--bdr);
+  display:flex;flex-direction:column;
+  position:relative;z-index:10;
 }
-.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(–bdr);position:relative}
-.logo-wrap::after{content:’’;position:absolute;bottom:0;left:0;right:0;height:1px;
-background:linear-gradient(90deg,var(–acc),transparent)}
+.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(--bdr);position:relative}
+.logo-wrap::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,var(--acc),transparent)}
 .logo-name{
-font-family:var(–disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
-color:var(–acc);line-height:1;
+  font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
+  color:var(--acc);line-height:1;
 }
-.logo-sub{font-family:var(–mono);font-size:.55rem;color:var(–muted);letter-spacing:.18em;margin-top:4px}
+.logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
 .logo-log-link{
-display:inline-block;margin-top:8px;font-family:var(–mono);font-size:.6rem;
-color:var(–muted);text-decoration:none;border:1px solid var(–bdr2);
-padding:3px 8px;border-radius:2px;transition:.15s;letter-spacing:.05em;
+  display:inline-block;margin-top:8px;font-family:var(--mono);font-size:.6rem;
+  color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);
+  padding:3px 8px;border-radius:2px;transition:.15s;letter-spacing:.05em;
 }
-.logo-log-link:hover{color:var(–acc2);border-color:var(–acc2)}
+.logo-log-link:hover{color:var(--acc2);border-color:var(--acc2)}
 
 .search-wrap{
-padding:10px 12px 12px;border-bottom:1px solid var(–bdr);position:relative;
+  padding:10px 12px 12px;border-bottom:1px solid var(--bdr);position:relative;
 }
 .search-wrap::before{
-content:’’;position:absolute;
-left:22px;top:50%;transform:translateY(-50%);
-width:12px;height:12px;pointer-events:none;
-background:var(–muted);
--webkit-mask:url(“data:image/svg+xml,%3Csvg xmlns=‘http://www.w3.org/2000/svg’ viewBox=‘0 0 16 16’%3E%3Cpath d=‘M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z’/%3E%3C/svg%3E”) center/contain no-repeat;
-mask:url(“data:image/svg+xml,%3Csvg xmlns=‘http://www.w3.org/2000/svg’ viewBox=‘0 0 16 16’%3E%3Cpath d=‘M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z’/%3E%3C/svg%3E”) center/contain no-repeat;
-transition:.2s;
+  content:'';position:absolute;
+  left:22px;top:50%;transform:translateY(-50%);
+  width:12px;height:12px;pointer-events:none;
+  background:var(--muted);
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
+  transition:.2s;
 }
-.search-wrap:focus-within::before{background:var(–acc)}
+.search-wrap:focus-within::before{background:var(--acc)}
 #search-box-desk{
-width:100%;padding:9px 12px 9px 32px;
-background:var(–surface2);
-border:1px solid var(–bdr);
-color:var(–hi);border-radius:3px;
-outline:none;font-family:var(–mono);font-size:.72rem;
-transition:border-color .2s,background .2s;
-caret-color:var(–acc);
+  width:100%;padding:9px 12px 9px 32px;
+  background:var(--surface2);
+  border:1px solid var(--bdr);
+  color:var(--hi);border-radius:3px;
+  outline:none;font-family:var(--mono);font-size:.72rem;
+  transition:border-color .2s,background .2s;
+  caret-color:var(--acc);
 }
 #search-box-desk:focus{
-border-color:var(–acc);
-background:var(–bg);
+  border-color:var(--acc);
+  background:var(--bg);
 }
-#search-box-desk::placeholder{color:var(–muted);letter-spacing:.03em}
+#search-box-desk::placeholder{color:var(--muted);letter-spacing:.03em}
 
-.filter-wrap{padding:8px 10px;border-bottom:1px solid var(–bdr);display:flex;gap:4px;flex-wrap:wrap}
+.filter-wrap{padding:8px 10px;border-bottom:1px solid var(--bdr);display:flex;gap:4px;flex-wrap:wrap}
 .cat-btn{
-padding:3px 9px;border-radius:2px;border:1px solid var(–bdr2);
-background:none;color:var(–muted);cursor:pointer;
-font-family:var(–mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;transition:.15s;
+  padding:3px 9px;border-radius:2px;border:1px solid var(--bdr2);
+  background:none;color:var(--muted);cursor:pointer;
+  font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;transition:.15s;
 }
-.cat-btn:hover{color:var(–hi);border-color:var(–text)}
-.cat-btn.active[data-cat=“ALL”]{background:rgba(56,191,255,.1);border-color:var(–acc);color:var(–acc)}
-.cat-btn.active[data-cat=“MALWARE”]{background:rgba(255,68,85,.1);border-color:var(–MALWARE);color:var(–MALWARE)}
-.cat-btn.active[data-cat=“INITIAL”]{background:rgba(240,192,64,.1);border-color:var(–INITIAL);color:var(–INITIAL)}
-.cat-btn.active[data-cat=“POST_EXP”]{background:rgba(176,106,255,.1);border-color:var(–POST_EXP);color:var(–POST_EXP)}
-.cat-btn.active[data-cat=“AI_SEC”]{background:rgba(56,191,255,.1);border-color:var(–AI_SEC);color:var(–AI_SEC)}
+.cat-btn:hover{color:var(--hi);border-color:var(--text)}
+.cat-btn.active[data-cat="ALL"]{background:rgba(56,191,255,.1);border-color:var(--acc);color:var(--acc)}
+.cat-btn.active[data-cat="MALWARE"]{background:rgba(255,68,85,.1);border-color:var(--MALWARE);color:var(--MALWARE)}
+.cat-btn.active[data-cat="INITIAL"]{background:rgba(240,192,64,.1);border-color:var(--INITIAL);color:var(--INITIAL)}
+.cat-btn.active[data-cat="POST_EXP"]{background:rgba(176,106,255,.1);border-color:var(--POST_EXP);color:var(--POST_EXP)}
+.cat-btn.active[data-cat="AI_SEC"]{background:rgba(56,191,255,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
 
 .date-list{flex:1;overflow-y:auto;padding:8px;overscroll-behavior:contain}
 .date-item{
-padding:7px 10px;border-radius:3px;cursor:pointer;
-font-family:var(–mono);font-size:.7rem;color:var(–muted);
-margin-bottom:2px;display:flex;justify-content:space-between;
-align-items:center;transition:.15s;border:1px solid transparent;
+  padding:7px 10px;border-radius:3px;cursor:pointer;
+  font-family:var(--mono);font-size:.7rem;color:var(--muted);
+  margin-bottom:2px;display:flex;justify-content:space-between;
+  align-items:center;transition:.15s;border:1px solid transparent;
 }
-.date-item:hover{background:var(–surf2);color:var(–hi);border-color:var(–bdr2)}
-.date-item.active{background:var(–surf2);color:var(–acc);border-color:var(–bdr2)}
-.date-badge{font-size:.58rem;background:var(–bdr);color:var(–muted);padding:1px 6px;border-radius:2px}
+.date-item:hover{background:var(--surf2);color:var(--hi);border-color:var(--bdr2)}
+.date-item.active{background:var(--surf2);color:var(--acc);border-color:var(--bdr2)}
+.date-badge{font-size:.58rem;background:var(--bdr);color:var(--muted);padding:1px 6px;border-radius:2px}
 
 .stats-bar{
-padding:10px 12px;border-top:1px solid var(–bdr);
-display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;
+  padding:10px 12px;border-top:1px solid var(--bdr);
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;
 }
 .stat-updated{
-grid-column:1/-1;border-top:1px solid var(–bdr);margin-top:4px;padding-top:6px;
-font-family:var(–mono);font-size:.55rem;color:var(–muted);text-align:center;letter-spacing:.05em;
+  grid-column:1/-1;border-top:1px solid var(--bdr);margin-top:4px;padding-top:6px;
+  font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center;letter-spacing:.05em;
 }
-.stat-updated span{color:var(–acc2)}
+.stat-updated span{color:var(--acc2)}
 
-.stat{font-family:var(–mono);font-size:.55rem;color:var(–muted);text-align:center}
-.stat-val{display:block;font-size:.85rem;font-weight:700;color:var(–acc);
-}
+.stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
+.stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc);
+  }
 
 /* ── Main feed ── */
 .main-feed{flex:1;overflow-y:auto;padding:16px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .feed{max-width:860px;margin:0 auto}
 .day-label{
-font-family:var(–mono);font-size:.6rem;letter-spacing:.18em;color:var(–muted);
-padding:14px 2px 8px;border-bottom:1px solid var(–bdr);margin-bottom:10px;
-display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);
+  padding:14px 2px 8px;border-bottom:1px solid var(--bdr);margin-bottom:10px;
+  display:flex;align-items:center;gap:8px;
 }
-.day-label::before{content:’//’;color:var(–acc);opacity:.5}
+.day-label::before{content:'//';color:var(--acc);opacity:.5}
 
 /* ── Card ── */
 .card{
-background:var(–surf);border:1px solid var(–bdr);border-radius:4px;
-padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .15s,border-color .15s;
-position:relative;overflow:hidden;
-contain:content;
+  background:var(--surf);border:1px solid var(--bdr);border-radius:4px;
+  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .15s,border-color .15s;
+  position:relative;overflow:hidden;
+  contain:content;
 }
 .card-source-link{
-display:inline-block;margin-top:8px;
-font-family:var(–mono);font-size:.58rem;color:var(–muted);
-text-decoration:none;letter-spacing:.04em;
-white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+  display:inline-block;margin-top:8px;
+  font-family:var(--mono);font-size:.58rem;color:var(--muted);
+  text-decoration:none;letter-spacing:.04em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
 }
-.card-source-link:hover{color:var(–acc2)}
-.card::before{content:’’;position:absolute;left:0;top:0;bottom:0;width:2px}
-.card[data-cat=“MALWARE”]::before{background:var(–MALWARE)}
-.card[data-cat=“INITIAL”]::before{background:var(–INITIAL)}
-.card[data-cat=“POST_EXP”]::before{background:var(–POST_EXP)}
-.card[data-cat=“AI_SEC”]::before{background:var(–AI_SEC)}
-.card:hover{background:var(–surf2);border-color:var(–bdr2)}
+.card-source-link:hover{color:var(--acc2)}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px}
+.card[data-cat="MALWARE"]::before{background:var(--MALWARE)}
+.card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
+.card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
+.card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
+.card:hover{background:var(--surf2);border-color:var(--bdr2)}
 .card:active{opacity:.85}
 
 .card-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
 .cat-tag{
-font-family:var(–mono);font-size:.58rem;font-weight:700;
-padding:2px 8px;border-radius:2px;letter-spacing:.06em;
+  font-family:var(--mono);font-size:.58rem;font-weight:700;
+  padding:2px 8px;border-radius:2px;letter-spacing:.06em;
 }
-.cat-tag[data-cat=“MALWARE”]{background:rgba(255,68,85,.12);color:var(–MALWARE);border:1px solid rgba(255,68,85,.25)}
-.cat-tag[data-cat=“INITIAL”]{background:rgba(240,192,64,.12);color:var(–INITIAL);border:1px solid rgba(240,192,64,.25)}
-.cat-tag[data-cat=“POST_EXP”]{background:rgba(176,106,255,.12);color:var(–POST_EXP);border:1px solid rgba(176,106,255,.25)}
-.cat-tag[data-cat=“AI_SEC”]{background:rgba(56,191,255,.08);color:var(–AI_SEC);border:1px solid rgba(56,191,255,.2)}
-.card-date{font-family:var(–mono);font-size:.6rem;color:var(–muted)}
+.cat-tag[data-cat="MALWARE"]{background:rgba(255,68,85,.12);color:var(--MALWARE);border:1px solid rgba(255,68,85,.25)}
+.cat-tag[data-cat="INITIAL"]{background:rgba(240,192,64,.12);color:var(--INITIAL);border:1px solid rgba(240,192,64,.25)}
+.cat-tag[data-cat="POST_EXP"]{background:rgba(176,106,255,.12);color:var(--POST_EXP);border:1px solid rgba(176,106,255,.25)}
+.cat-tag[data-cat="AI_SEC"]{background:rgba(56,191,255,.08);color:var(--AI_SEC);border:1px solid rgba(56,191,255,.2)}
+.card-date{font-family:var(--mono);font-size:.6rem;color:var(--muted)}
 .cvss-badge{
-font-family:var(–mono);font-size:.58rem;font-weight:700;
-padding:2px 7px;border-radius:2px;margin-left:auto;
+  font-family:var(--mono);font-size:.58rem;font-weight:700;
+  padding:2px 7px;border-radius:2px;margin-left:auto;
 }
 .cvss-critical{background:rgba(255,68,85,.12);color:#ff4455;border:1px solid rgba(255,68,85,.3)}
 .cvss-high{background:rgba(240,192,64,.12);color:#f0c040;border:1px solid rgba(240,192,64,.3)}
@@ -645,235 +597,232 @@ padding:2px 7px;border-radius:2px;margin-left:auto;
 .cvss-low{background:rgba(56,191,255,.08);color:#38bfff;border:1px solid rgba(56,191,255,.2)}
 
 .card-title{
-font-family:var(–disp);font-size:1.05rem;font-weight:600;
-color:var(–hi);line-height:1.4;margin-bottom:9px;letter-spacing:.02em;
+  font-family:var(--disp);font-size:1.05rem;font-weight:600;
+  color:var(--hi);line-height:1.4;margin-bottom:9px;letter-spacing:.02em;
 }
-.card-summary{font-size:.78rem;color:var(–text);line-height:1.7;list-style:none;padding:0}
+.card-summary{font-size:.78rem;color:var(--text);line-height:1.7;list-style:none;padding:0}
 .card-summary li{padding:1px 0 1px 14px;position:relative}
-.card-summary li::before{content:’›’;position:absolute;left:0;color:var(–acc);font-weight:700}
+.card-summary li::before{content:'›';position:absolute;left:0;color:var(--acc);font-weight:700}
 .card-footer{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
 .mitre-chip{
-font-family:var(–mono);font-size:.56rem;
-background:rgba(176,106,255,.08);color:#c084fc;
-border:1px solid rgba(176,106,255,.18);padding:2px 6px;border-radius:2px;
+  font-family:var(--mono);font-size:.56rem;
+  background:rgba(176,106,255,.08);color:#c084fc;
+  border:1px solid rgba(176,106,255,.18);padding:2px 6px;border-radius:2px;
 }
 .poc-chip{
-font-family:var(–mono);font-size:.56rem;
-background:rgba(56,191,255,.07);color:var(–acc);
-border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
-animation:blink 2s infinite;
-will-change:opacity;
+  font-family:var(--mono);font-size:.56rem;
+  background:rgba(56,191,255,.07);color:var(--acc);
+  border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
+  animation:blink 2s infinite;
+  will-change:opacity;
 }
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
-.no-data{text-align:center;padding:80px 20px;font-family:var(–mono);color:var(–muted);font-size:.72rem;letter-spacing:.1em}
+.no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.1em}
 
 /* ── Card action buttons ── */
-.card-actions{display:flex;gap:5px;margin-top:10px;padding-top:8px;border-top:1px solid var(–bdr)}
+.card-actions{display:flex;gap:5px;margin-top:10px;padding-top:8px;border-top:1px solid var(--bdr)}
 .act-btn{
-font-family:var(–mono);font-size:.58rem;font-weight:700;letter-spacing:.06em;
-padding:3px 10px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
-background:none;border:1px solid var(–bdr2);color:var(–muted);
+  font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.06em;
+  padding:3px 10px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
+  background:none;border:1px solid var(--bdr2);color:var(--muted);
 }
-.act-btn:hover{color:var(–hi);border-color:var(–text)}
-.act-btn.flag-btn.flagged{background:rgba(240,192,64,.1);color:var(–acc2);border-color:rgba(240,192,64,.3)}
-.act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(–MALWARE);border-color:rgba(255,68,85,.3)}
+.act-btn:hover{color:var(--hi);border-color:var(--text)}
+.act-btn.flag-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
+.act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
 
 /* ── Detail action bar ── */
-.det-action-bar{display:flex;gap:8px;margin:16px 0;padding-bottom:16px;border-bottom:1px solid var(–bdr);flex-wrap:wrap}
+.det-action-bar{display:flex;gap:8px;margin:16px 0;padding-bottom:16px;border-bottom:1px solid var(--bdr);flex-wrap:wrap}
 .det-act-btn{
-font-family:var(–mono);font-size:.65rem;font-weight:700;letter-spacing:.06em;
-padding:6px 16px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
-background:none;border:1px solid var(–bdr2);color:var(–muted);
+  font-family:var(--mono);font-size:.65rem;font-weight:700;letter-spacing:.06em;
+  padding:6px 16px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
+  background:none;border:1px solid var(--bdr2);color:var(--muted);
 }
-.det-act-btn:hover{color:var(–hi);border-color:var(–text)}
-.det-act-btn.flagged{background:rgba(240,192,64,.1);color:var(–acc2);border-color:rgba(240,192,64,.3)}
-.det-act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(–MALWARE);border-color:rgba(255,68,85,.3)}
+.det-act-btn:hover{color:var(--hi);border-color:var(--text)}
+.det-act-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
+.det-act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
 .det-act-btn.teams-btn{border-color:rgba(100,153,255,.3);color:#6499ff}
 .det-act-btn.teams-btn:hover{background:rgba(100,153,255,.08);border-color:rgba(100,153,255,.5)}
 .det-act-btn.teams-btn.sending{opacity:.5;pointer-events:none}
 
 /* ── Teams settings modal ── */
 .modal-overlay{
-display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;
-align-items:center;justify-content:center;
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;
+  align-items:center;justify-content:center;
 }
 .modal-overlay.open{display:flex}
 .modal{
-background:var(–surf);border:1px solid var(–bdr2);border-radius:6px;
-padding:28px 24px;max-width:480px;width:90%;position:relative;
+  background:var(--surf);border:1px solid var(--bdr2);border-radius:6px;
+  padding:28px 24px;max-width:480px;width:90%;position:relative;
 }
-.modal h3{font-family:var(–disp);font-size:1.1rem;color:var(–hi);margin-bottom:6px;letter-spacing:.05em}
-.modal p{font-size:.75rem;color:var(–muted);margin-bottom:16px;line-height:1.6}
-.modal label{display:block;font-family:var(–mono);font-size:.62rem;color:var(–text);margin-bottom:5px;letter-spacing:.06em}
+.modal h3{font-family:var(--disp);font-size:1.1rem;color:var(--hi);margin-bottom:6px;letter-spacing:.05em}
+.modal p{font-size:.75rem;color:var(--muted);margin-bottom:16px;line-height:1.6}
+.modal label{display:block;font-family:var(--mono);font-size:.62rem;color:var(--text);margin-bottom:5px;letter-spacing:.06em}
 .modal input{
-width:100%;padding:9px 12px;background:var(–bg);border:1px solid var(–bdr2);
-color:var(–hi);border-radius:3px;outline:none;font-family:var(–mono);font-size:.72rem;
-margin-bottom:14px;transition:.2s;
+  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--bdr2);
+  color:var(--hi);border-radius:3px;outline:none;font-family:var(--mono);font-size:.72rem;
+  margin-bottom:14px;transition:.2s;
 }
-.modal input:focus{border-color:var(–acc)}
+.modal input:focus{border-color:var(--acc)}
 .modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
 .modal-btn{
-font-family:var(–mono);font-size:.65rem;font-weight:700;padding:7px 18px;
-border-radius:2px;cursor:pointer;transition:.15s;border:1px solid var(–bdr2);
-background:none;color:var(–muted);
+  font-family:var(--mono);font-size:.65rem;font-weight:700;padding:7px 18px;
+  border-radius:2px;cursor:pointer;transition:.15s;border:1px solid var(--bdr2);
+  background:none;color:var(--muted);
 }
-.modal-btn:hover{color:var(–hi);border-color:var(–text)}
-.modal-btn.primary{background:rgba(56,191,255,.1);color:var(–acc);border-color:rgba(56,191,255,.3)}
+.modal-btn:hover{color:var(--hi);border-color:var(--text)}
+.modal-btn.primary{background:rgba(56,191,255,.1);color:var(--acc);border-color:rgba(56,191,255,.3)}
 .modal-btn.primary:hover{background:rgba(56,191,255,.18)}
-.teams-status{font-family:var(–mono);font-size:.6rem;margin-top:10px;padding:8px 10px;border-radius:3px;display:none}
-.teams-status.ok{background:rgba(56,191,255,.08);color:var(–acc);border:1px solid rgba(56,191,255,.2);display:block}
-.teams-status.err{background:rgba(255,68,85,.08);color:var(–MALWARE);border:1px solid rgba(255,68,85,.2);display:block}
+.teams-status{font-family:var(--mono);font-size:.6rem;margin-top:10px;padding:8px 10px;border-radius:3px;display:none}
+.teams-status.ok{background:rgba(56,191,255,.08);color:var(--acc);border:1px solid rgba(56,191,255,.2);display:block}
+.teams-status.err{background:rgba(255,68,85,.08);color:var(--MALWARE);border:1px solid rgba(255,68,85,.2);display:block}
 
 /* ── Detail overlay ── */
 #detail{
-position:fixed;inset:0;background:var(–bg);z-index:200;
-display:flex;flex-direction:column;
-transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);
+  position:fixed;inset:0;background:var(--bg);z-index:200;
+  display:flex;flex-direction:column;
+  transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);
 }
 #detail.open{transform:none}
 .det-header{
-background:rgba(12,23,18,.98);
-border-bottom:1px solid var(–bdr);padding:12px 16px;
-display:flex;align-items:center;gap:10px;flex-shrink:0;position:relative;
+  background:rgba(12,23,18,.98);
+  border-bottom:1px solid var(--bdr);padding:12px 16px;
+  display:flex;align-items:center;gap:10px;flex-shrink:0;position:relative;
 }
-.det-header::after{content:’’;position:absolute;bottom:0;left:0;right:0;height:1px;
-background:linear-gradient(90deg,var(–acc),transparent 60%)}
+.det-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,var(--acc),transparent 60%)}
 .back-btn{
-background:none;border:1px solid var(–bdr2);color:var(–acc);
-padding:6px 14px;border-radius:2px;cursor:pointer;
-font-family:var(–mono);font-size:.68rem;font-weight:700;transition:.15s;
+  background:none;border:1px solid var(--bdr2);color:var(--acc);
+  padding:6px 14px;border-radius:2px;cursor:pointer;
+  font-family:var(--mono);font-size:.68rem;font-weight:700;transition:.15s;
 }
 .back-btn:hover{background:rgba(56,191,255,.07)}
-.det-url{margin-left:auto;font-family:var(–mono);font-size:.6rem;color:var(–muted);text-decoration:none}
-.det-url:hover{color:var(–text)}
+.det-url{margin-left:auto;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none}
+.det-url:hover{color:var(--text)}
 
 .det-body{flex:1;overflow-y:auto;padding:32px 20px}
 .det-inner{max-width:800px;margin:0 auto}
-.det-title{font-family:var(–disp);font-size:1.65rem;font-weight:700;color:var(–hi);
-line-height:1.3;margin-bottom:16px;letter-spacing:.02em}
+.det-title{font-family:var(--disp);font-size:1.65rem;font-weight:700;color:var(--hi);
+  line-height:1.3;margin-bottom:16px;letter-spacing:.02em}
 .det-meta-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
-margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(–bdr)}
+  margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--bdr)}
 .poc-btn{
-display:inline-flex;align-items:center;gap:6px;
-background:rgba(56,191,255,.08);color:var(–acc);
-border:1px solid rgba(56,191,255,.25);
-padding:8px 16px;border-radius:3px;text-decoration:none;
-font-family:var(–mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
+  display:inline-flex;align-items:center;gap:6px;
+  background:rgba(56,191,255,.08);color:var(--acc);
+  border:1px solid rgba(56,191,255,.25);
+  padding:8px 16px;border-radius:3px;text-decoration:none;
+  font-family:var(--mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
 }
 .poc-btn:hover{background:rgba(56,191,255,.15)}
 
 /* markdown */
 .det-inner h1{display:none}
 .det-inner h2{
-font-family:var(–disp);font-size:1rem;font-weight:700;color:var(–acc);
-letter-spacing:.12em;text-transform:uppercase;
-border-bottom:1px solid var(–bdr);padding-bottom:6px;margin:30px 0 12px;
+  font-family:var(--disp);font-size:1rem;font-weight:700;color:var(--acc);
+  letter-spacing:.12em;text-transform:uppercase;
+  border-bottom:1px solid var(--bdr);padding-bottom:6px;margin:30px 0 12px;
 }
-.det-inner h3{font-size:.92rem;font-weight:600;color:var(–hi);margin:16px 0 7px}
-.det-inner p{line-height:1.8;margin-bottom:10px;color:var(–text)}
+.det-inner h3{font-size:.92rem;font-weight:600;color:var(--hi);margin:16px 0 7px}
+.det-inner p{line-height:1.8;margin-bottom:10px;color:var(--text)}
 .det-inner ul,.det-inner ol{padding-left:20px;margin-bottom:10px;line-height:1.8}
-.det-inner li{margin-bottom:4px;color:var(–text)}
+.det-inner li{margin-bottom:4px;color:var(--text)}
 .det-inner pre{
-background:#040c1a;border:1px solid var(–bdr2);border-left:2px solid var(–acc);
-border-radius:3px;padding:16px 16px 16px 18px;overflow-x:auto;margin:14px 0;position:relative;
+  background:#040c1a;border:1px solid var(--bdr2);border-left:2px solid var(--acc);
+  border-radius:3px;padding:16px 16px 16px 18px;overflow-x:auto;margin:14px 0;position:relative;
 }
-.det-inner code{font-family:var(–mono);font-size:.78rem;color:var(–acc);line-height:1.7}
-.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;font-size:.78rem;color:var(–acc2)}
-.det-inner blockquote{border-left:2px solid var(–bdr2);padding-left:12px;color:var(–muted);margin:10px 0}
+.det-inner code{font-family:var(--mono);font-size:.78rem;color:var(--acc);line-height:1.7}
+.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;font-size:.78rem;color:var(--acc2)}
+.det-inner blockquote{border-left:2px solid var(--bdr2);padding-left:12px;color:var(--muted);margin:10px 0}
 .det-inner table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.78rem}
-.det-inner th{background:var(–surf2);padding:8px 10px;text-align:left;border:1px solid var(–bdr);
-color:var(–hi);font-family:var(–mono);font-size:.62rem;letter-spacing:.07em}
-.det-inner td{padding:7px 10px;border:1px solid var(–bdr);color:var(–text)}
-.det-inner strong{color:var(–hi)}
+.det-inner th{background:var(--surf2);padding:8px 10px;text-align:left;border:1px solid var(--bdr);
+  color:var(--hi);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em}
+.det-inner td{padding:7px 10px;border:1px solid var(--bdr);color:var(--text)}
+.det-inner strong{color:var(--hi)}
 .copy-btn{
-position:absolute;top:8px;right:8px;background:var(–surf2);border:1px solid var(–bdr2);
-color:var(–muted);font-family:var(–mono);font-size:.58rem;padding:3px 7px;
-border-radius:2px;cursor:pointer;transition:.15s;
+  position:absolute;top:8px;right:8px;background:var(--surf2);border:1px solid var(--bdr2);
+  color:var(--muted);font-family:var(--mono);font-size:.58rem;padding:3px 7px;
+  border-radius:2px;cursor:pointer;transition:.15s;
 }
-.copy-btn:hover{color:var(–acc);border-color:var(–acc)}
+.copy-btn:hover{color:var(--acc);border-color:var(--acc)}
 
 /* ════════════════════════════════
-MOBILE — bottom tab bar
+   MOBILE — bottom tab bar
 ════════════════════════════════ */
 .mob-header{display:none}
 .tab-bar{display:none}
 
 @media(max-width:700px){
-.layout{flex-direction:column;height:100vh}
-.sidebar{display:none}   /* hide desktop sidebar */
+  .layout{flex-direction:column;height:100vh}
+  .sidebar{display:none}   /* hide desktop sidebar */
 
-/* top bar */
-.mob-header{
-display:flex;align-items:center;gap:10px;
-padding:10px 14px;background:var(–surf);border-bottom:1px solid var(–bdr);
-flex-shrink:0;position:relative;
-}
-.mob-header::after{content:’’;position:absolute;bottom:0;left:0;right:0;height:1px;
-background:linear-gradient(90deg,var(–acc),transparent 60%)}
-/* モバイル検索: mob-headerに統合 */
-.mob-header #mob-search-inline{
-flex:1;padding:7px 10px;background:var(–surface2);border:1px solid var(–bdr);
-color:var(–hi);border-radius:3px;outline:none;
-font-family:var(–mono);font-size:.72rem;caret-color:var(–acc);
-}
-.mob-header #mob-search-inline:focus{border-color:var(–acc)}
-.mob-header #mob-search-inline::placeholder{color:var(–muted)}
-.mob-logo{font-family:var(–disp);font-size:1.3rem;font-weight:700;
-color:var(–acc);letter-spacing:.1em;}
+  /* top bar */
+  .mob-header{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 14px;background:var(--surf);border-bottom:1px solid var(--bdr);
+    flex-shrink:0;position:relative;
+  }
+  .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,var(--acc),transparent 60%)}
+  /* モバイル検索: mob-headerに統合 */
+  .mob-header #mob-search-inline{
+    flex:1;padding:7px 10px;background:var(--surface2);border:1px solid var(--bdr);
+    color:var(--hi);border-radius:3px;outline:none;
+    font-family:var(--mono);font-size:.72rem;caret-color:var(--acc);
+  }
+  .mob-header #mob-search-inline:focus{border-color:var(--acc)}
+  .mob-header #mob-search-inline::placeholder{color:var(--muted)}
+  .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
+    color:var(--acc);letter-spacing:.1em;}
 
-/* feed takes full width */
-.main-feed{flex:1;overflow-y:auto;padding:10px 10px 80px}
+  /* feed takes full width */
+  .main-feed{flex:1;overflow-y:auto;padding:10px 10px 80px}
 
-/* bottom tab bar */
-.tab-bar{
-display:flex;position:fixed;bottom:0;left:0;right:0;
-background:var(–surf);border-top:1px solid var(–bdr);z-index:100;
-height:58px;
-}
-.tab-btn{
-flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-gap:3px;background:none;border:none;color:var(–muted);cursor:pointer;
-font-family:var(–mono);font-size:.5rem;letter-spacing:.06em;transition:.15s;
-border-top:2px solid transparent;padding:0;
-}
-.tab-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5}
-.tab-btn.active{color:var(–acc);border-top-color:var(–acc)}
-.tab-btn.active svg{opacity:1}
+  /* bottom tab bar */
+  .tab-bar{
+    display:flex;position:fixed;bottom:0;left:0;right:0;
+    background:var(--surf);border-top:1px solid var(--bdr);z-index:100;
+    height:58px;
+  }
+  .tab-btn{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;background:none;border:none;color:var(--muted);cursor:pointer;
+    font-family:var(--mono);font-size:.5rem;letter-spacing:.06em;transition:.15s;
+    border-top:2px solid transparent;padding:0;
+  }
+  .tab-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5}
+  .tab-btn.active{color:var(--acc);border-top-color:var(--acc)}
+  .tab-btn.active svg{opacity:1}
 
-/* mobile date drawer */
-.mob-drawer{
-display:none;position:fixed;bottom:58px;left:0;right:0;
-background:var(–surf);border-top:1px solid var(–bdr);
-max-height:50vh;overflow-y:auto;z-index:99;padding:8px;
-}
-.mob-drawer.open{display:block}
-.mob-drawer .date-item{font-size:.75rem;padding:10px 12px}
-.mob-filter-wrap{padding:8px;display:flex;gap:5px;flex-wrap:wrap;
-border-bottom:1px solid var(–bdr)}
+  /* mobile date drawer */
+  .mob-drawer{
+    display:none;position:fixed;bottom:58px;left:0;right:0;
+    background:var(--surf);border-top:1px solid var(--bdr);
+    max-height:50vh;overflow-y:auto;z-index:99;padding:8px;
+  }
+  .mob-drawer.open{display:block}
+  .mob-drawer .date-item{font-size:.75rem;padding:10px 12px}
+  .mob-filter-wrap{padding:8px;display:flex;gap:5px;flex-wrap:wrap;
+    border-bottom:1px solid var(--bdr)}
 
-/* detail on mobile */
-#detail{bottom:58px}
+  /* detail on mobile */
+  #detail{bottom:58px}
 
-.stats-bar{display:none}
+  .stats-bar{display:none}
 }
 
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(–bdr2);border-radius:10px}
+::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:10px}
 </style>
-
 </head>
 <body>
 
 <!-- MOBILE HEADER -->
-
 <div class="mob-header">
   <span class="mob-logo">CIPHER</span>
   <input type="text" id="mob-search-inline" placeholder="search..." autocomplete="off">
 </div>
 
 <!-- DESKTOP LAYOUT -->
-
 <div class="layout">
   <nav class="sidebar">
     <div class="logo-wrap">
@@ -909,7 +858,6 @@ border-bottom:1px solid var(–bdr)}
 </div>
 
 <!-- MOBILE BOTTOM TAB BAR -->
-
 <div class="tab-bar">
   <button class="tab-btn active" id="tab-feed" onclick="setTab('feed')">
     <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>FEED
@@ -926,7 +874,6 @@ border-bottom:1px solid var(–bdr)}
 </div>
 
 <!-- MOBILE DATE DRAWER -->
-
 <div class="mob-drawer" id="mob-drawer">
   <div class="mob-filter-wrap" id="mob-filter-wrap"></div>
   <div id="mob-date-list"></div>
@@ -935,7 +882,6 @@ border-bottom:1px solid var(–bdr)}
 <!-- DETAIL VIEW -->
 
 <!-- Teams settings modal -->
-
 <div class="modal-overlay" id="teams-modal">
   <div class="modal">
     <h3>Microsoft Teams 連携</h3>
@@ -962,9 +908,7 @@ border-bottom:1px solid var(–bdr)}
 </div>
 
 <script src="log.js"></script>
-
 <script src="articles.js"></script>
-
 <script>
 const db = window.__ARTICLES__ || [];
 let activeCat  = 'ALL';
@@ -1344,13 +1288,12 @@ function closeMobDrawer(){
 
 init();
 </script>
-
 </body>
 </html>"""
 
-def _build_log_html() -> str:
-return “””<!DOCTYPE html>
 
+def _build_log_html() -> str:
+    return """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -1449,14 +1392,12 @@ if(!log.length){
 </html>"""
 
 # Entry point
-
 # ─────────────────────────────────────────────
-
-if **name** == “**main**”:
-db = load_db()
-existing_urls = {a[“url”] for a in db}
-new_data = fetch_and_analyze(existing_urls)
-db = update_db(db, new_data)
-run_log = load_run_log()
-run_log = append_run_log(run_log, len(new_data), len(db))
-generate_html(db, run_log)
+if __name__ == "__main__":
+    db = load_db()
+    existing_urls = {a["url"] for a in db}
+    new_data = fetch_and_analyze(existing_urls)
+    db = update_db(db, new_data)
+    run_log = load_run_log()
+    run_log = append_run_log(run_log, len(new_data), len(db))
+    generate_html(db, run_log)
