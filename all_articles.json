@@ -37,6 +37,24 @@
     "url": "https://www.stackone.com/blog/indirect-prompt-injection-mcp-tools-defense"
   },
   {
+    "date": "2026-04-01",
+    "category": "MALWARE",
+    "title": "EDR Evading Techniques",
+    "summary_points": [
+      "Reflective DLL Injection",
+      "Process Hollowing",
+      "Process Doppelgänging"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012",
+      "T1204.002"
+    ],
+    "content": "## 概要\nThis report details several evasion techniques used to bypass Endpoint Detection and Response (EDR) systems. These techniques include Reflective DLL Injection, Process Hollowing, Process Doppelgänging, Unhooking EDR Function Hooks, DNS or Remote Shellcode Staging, Binary Padding and Junk Code, Custom PE Headers or Packers, Signed Binary Proxy Execution, String and API Obfuscation, and Shellcode Encryption.\n\n**★️ 新規性・統一リス:** This report highlights various EDR evasion techniques, including novel methods such as Process Doppelgänging and Unhooking EDR Function Hooks, which are not widely known.\n\n## 脆弱性・赛悪の技術皇メカニズム\nThe techniques discussed in this report exploit various vulnerabilities in EDR systems, including their inability to detect malicious code in memory, their reliance on signature-based detection, and their limited visibility into system calls.\n\n## 再現手項（レッドチィムテスター向け）\n1. Install a Windows virtual machine with an EDR system installed.\n2. Compile a Reflective DLL Injection tool, such as Reflective DLL Injection by Matt Pietrek.\n3. Run the tool and inject a malicious DLL into a legitimate process.\n4. Verify that the EDR system does not detect the malicious activity.\n5. Repeat steps 3-4 for each evasion technique discussed in this report.\n\n## 寿行コマンド・再現コード\n```bash\n# Compile Reflective DLL Injection tool\ngcc -o reflective_dll_injection reflective_dll_injection.c\n\n# Inject malicious DLL into legitimate process\n./reflective_dll_injection -p notepad.exe -d malicious.dll\n```\n\n## MITRE ATT&CK マッヒング\nT1055.012: Process Hollowing\nT1204.002: User Data\n\n## 検知シグネチィャヒリコサ\n```sigma\ntitle: Detect Reflective DLL Injection\nlogsource: windows\ntype: detection\ndefinition: |\n  process where process.name == \"notepad.exe\" and\n  not process.executable == \"C:\\Windows\\System32\\notepad.exe\"\n```\n",
+    "url": "https://medium.com/@subhashmurugan00/how-modern-malware-hides-evasion-techniques-attackers-use-to-bypass-antivirus-and-edr-3e28e1f50e55"
+  },
+  {
     "date": "2026-03-31",
     "category": "MALWARE",
     "title": "Steganography Loader Detection",
