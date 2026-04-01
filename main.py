@@ -111,7 +111,7 @@ LANGUAGE REQUIREMENT (ABSOLUTE): Write ALL sections in JAPANESE only.
 - Examples of WRONG: "This malware uses VirtualAlloc to deploy shellcode"
 
 CRITICAL: Every section must be FULLY written. Never end a section with "..." or mid-sentence.
-If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Never cut other sections short.
+If running out of space, shorten ## 検知・防御策 ONLY. Never cut other sections short.
 
 [## 概要]
 - 3〜5文で技術的要点を簡潔にまとめる
@@ -148,15 +148,24 @@ If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Neve
 [## MITRE ATT&CK マッピング]
 サブテクニックIDまで記載（例: T1055.012）
 
-[## 検知シグネチャ・緩和策]
-最低1つの具体的な検知ルール（Sigma/YARA/KQLスニペット推奨）
+[## 検知・防御策]
+以下の2ブロックで構成すること（見出しはそのまま使用）:
+
+**防御策**
+・具体的な防御策を箇条書き（設定変更・パッチ・権限制限など）
+・最低3項目
+
+**検知策**
+①検知する場所: EDR / IPS/IDS / NDR / SIEM / Windowsイベントログ など、実際にどのログ取得元で検知できるかを明記
+②IoCをSIEMクエリ形式で記載（KQL / Sigma / SPL のいずれかで最低1つ）
+　例: プロセス名・コマンドライン・通信先IP・レジストリキー・ファイルハッシュ など具体的な値を含めること
 
 OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \\n for newlines.
 IMPORTANT: "title" and "summary_points" must be in JAPANESE. "report" must be entirely in JAPANESE.
 
 Skip: {{"skip": true, "reason": "理由"}}
 
-Full: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n...\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド・再現コード\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知シグネチャ・緩和策\\n```\\n...\\n```"}}
+Full: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n...\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド・再現コード\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知・防御策\\n**防御策**\\n・...\\n\\n**検知策**\\n①検知する場所: ...\\n②KQL/Sigma: ```\\n...\\n```"}}
 
 SOURCE ARTICLE:
 {content[:8000]}"""
