@@ -53,5 +53,10 @@
     "datetime_jst": "2026-04-01 11:42",
     "new_articles": 1,
     "total_articles": 33
+  },
+  {
+    "datetime_jst": "2026-04-01 12:02",
+    "new_articles": 0,
+    "total_articles": 33
   }
 ]
