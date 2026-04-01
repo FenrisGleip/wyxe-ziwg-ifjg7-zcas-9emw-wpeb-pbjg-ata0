@@ -6,7 +6,11 @@ import time
 import hashlib
 from tavily import TavilyClient
 from groq import Groq
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
+def now_jst():
+    return datetime.now(JST)
 
 # ─────────────────────────────────────────────
 # 設定
@@ -26,7 +30,7 @@ SLEEP_BETWEEN_REQ = 2.5  # Groq無料枠レート制限対策
 # deepseek-r1-distill-llama-70b は2025年9月に廃止済み
 # llama-4-scout: TPD 500,000 (llama-3.3-70b-versatileの5倍) で余裕あり
 PRIMARY_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "llama-3.1-8b-instant"   # TPD 500,000、速度重視
+FALLBACK_MODEL = "llama3-70b-8192"   # llama-4-scoutが失敗した場合のフォールバック
 
 # ─────────────────────────────────────────────
 # 検索クエリ（セキュリティ研究ソースに誘導）
@@ -99,6 +103,13 @@ If novelty score is 4 or 5: write the COMPLETE report below. DO NOT truncate any
 
 ━━━ STEP 2: FULL REPORT ━━━
 
+LANGUAGE REQUIREMENT (ABSOLUTE): Write ALL sections in JAPANESE only.
+- Section headers: use the exact Japanese headers specified below
+- Body text: 100% Japanese. NO English sentences or paragraphs.
+- Technical terms: keep original English for tool names, CVE IDs, API names, command syntax
+- Examples of CORRECT: "このマルウェアはVirtualAllocを使用してシェルコードを展開する"
+- Examples of WRONG: "This malware uses VirtualAlloc to deploy shellcode"
+
 CRITICAL: Every section must be FULLY written. Never end a section with "..." or mid-sentence.
 If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Never cut other sections short.
 
@@ -141,6 +152,7 @@ If running out of space, shorten ## 検知シグネチャ・緩和策 ONLY. Neve
 最低1つの具体的な検知ルール（Sigma/YARA/KQLスニペット推奨）
 
 OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \\n for newlines.
+IMPORTANT: "title" and "summary_points" must be in JAPANESE. "report" must be entirely in JAPANESE.
 
 Skip: {{"skip": true, "reason": "理由"}}
 
@@ -207,7 +219,7 @@ def validate_result(res: dict) -> bool:
 # LLM呼び出し（モデルフォールバック付きリトライ）
 # ─────────────────────────────────────────────
 def call_llm(prompt: str) -> dict | None:
-    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:  # 両モデルとも高品質
         for attempt in range(MAX_RETRIES):
             try:
                 resp = groq_client.chat.completions.create(
@@ -307,7 +319,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                     seen_title_hashes.add(th)
 
                     new_articles.append({
-                        "date":         datetime.now().strftime("%Y-%m-%d"),
+                        "date":         now_jst().strftime("%Y-%m-%d"),
                         "category":     cat_id,
                         "title":        result["title"],
                         "summary_points": result.get("summary_points", []),
@@ -378,7 +390,7 @@ def load_run_log() -> list[dict]:
 
 def append_run_log(run_log: list[dict], new_articles_count: int, total_count: int) -> list[dict]:
     entry = {
-        "datetime_jst": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "datetime_jst": now_jst().strftime("%Y-%m-%d %H:%M"),
         "new_articles":  new_articles_count,
         "total_articles": total_count,
     }
