@@ -1,5 +1,22 @@
 [
   {
+    "date": "2026-04-03",
+    "category": "POST_EXP",
+    "title": "CVE-2026-25177 を悪用した特権昇格攻撃",
+    "summary_points": [
+      "CVE-2026-25177 を悪用した特権昇格攻撃が報告された。重要なのは、認証された低権限の攻撃者がネットワークを経由して特権を昇格させ、ドメインリソースへの不正アクセスや管理権限の獲得を可能にする点である。",
+      "認証された低権限の攻撃者が、Active Directory Domain Servicesのリソース名制限を悪用して特権昇格を達成する。",
+      "脆弱性は、CWE-641（ファイルおよびその他のリソースの名前の不適切な制限）に起因する。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1068"
+    ],
+    "content": "## 概要\n\nCVE-2026-25177 を悪用した特権昇格攻撃が報告された。重要なのは、認証された低権限の攻撃者がネットワークを経由して特権を昇格させ、ドメインリソースへの不正アクセスや管理権限の獲得を可能にする点である。\n\n技術的要点:\n- 認証された低権限の攻撃者が、Active Directory Domain Servicesのリソース名制限を悪用して特権昇格を達成する\n- 脆弱性は、CWE-641（ファイルおよびその他のリソースの名前の不適切な制限）に起因する\n- 攻撃者は、ネットワーク経由でドメインセキュリティを脅かし、管理アクセス権を獲得する可能性がある\n\n**🆕 新規性・差異化ポイント:** \n従来の特権昇格手法と異なる点は、認証された低権限の攻撃者がActive Directory Domain Servicesのリソース名制限を悪用する点である。[推測]\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2026-25177\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nこの脆弱性は、CWE-641（ファイルおよびその他のリソースの名前の不適切な制限）に起因する。Active Directory Domain Servicesでは、ソフトウェアがリソース（ファイル、ディレクトリ、その他のオブジェクト）の名前を適切に制限していないことが問題となる。認証された低権限のユーザーが、リソースの命名慣習を操作してセキュリティコントロールをバイパスし、特権昇格を達成することが可能である。\n\n## 再現手順（攻撃者視点）\n\n前提条件: \n- Windowsドメイン環境\n- 低権限の認証されたユーザーアカウント\n- Active Directory Domain Servicesが動作している\n\n1. 低権限の認証されたユーザーアカウントを使用してドメインにログインする。\n2. Active Directory Domain Servicesのリソース名制限を悪用して、特権昇格を達成する手法を調査する。\n3. Microsoft Security Update Guideを参照して、脆弱性の詳細な技術的解説情報を入手する。\n\n## 実行コマンド・再現コード\n\n```bash\n# 特権昇格を達成する具体的なコマンドやコードは、脆弱性の詳細な技術的解説情報に基づく必要がある\n# 例: 利用可能なパッチ情報を確認する\nmsconfig\n```\n\n## MITRE ATT&CK マッピング\n\n- T1068: 特権昇格\n\n## 検知・防御策\n\n**防御策**\n・直ちにセキュリティ更新プログラムを適用する\n・Active Directory Domain Servicesを実行しているすべてのドメインコントローラーおよびシステムにパッチを適用する\n・ネットワークアクセス制御を強化する\n\n**検知策**\n①検知ポイント: \n- Windowsイベントログ\n- Active Directoryの監査ログ\n\n②Sigma/KQL:\n```\ntitle: CVE-2026-25177\ndescription: CVE-2026-25177\nquery: \n  process.name == \"lsass.exe\" and \n  process.command_line == \"*Microsoft.ActiveDirectory.DomainServices*\"\n```",
+    "url": "https://www.sentinelone.com/vulnerability-database/cve-2026-25177/"
+  },
+  {
     "date": "2026-04-02",
     "category": "INITIAL",
     "title": "CVE-2026-21858 + CVE-2025-68613 - n8n Full Chain",
