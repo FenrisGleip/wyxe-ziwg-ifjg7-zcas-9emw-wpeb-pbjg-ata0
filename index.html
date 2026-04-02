@@ -381,6 +381,12 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
     max-height:50vh;overflow-y:auto;z-index:99;padding:8px;
   }
   .mob-drawer.open{display:block}
+  /* PC幅に戻っても残留しないようdisplay:noneを保証 */
+  @media(min-width:701px){
+    .mob-drawer,.mob-drawer.open{display:none!important}
+    .tab-bar{display:none!important}
+    .mob-header{display:none!important}
+  }
   .mob-drawer .date-item{font-size:.75rem;padding:10px 12px}
   .mob-filter-wrap{padding:8px;display:flex;gap:5px;flex-wrap:wrap;
     border-bottom:1px solid var(--bdr)}
@@ -852,7 +858,9 @@ window.onpopstate=()=>closeDetail();
 
 /* ── mobile tab / drawer ── */
 let drawerMode=null;
+function isMobile(){ return window.innerWidth <= 700; }
 function setTab(t){
+  if(!isMobile()) return;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('tab-'+t)?.classList.add('active');
   if(t==='feed'){closeMobDrawer();}
@@ -867,6 +875,12 @@ function closeMobDrawer(){
   document.getElementById('tab-feed')?.classList.add('active');
   document.querySelectorAll('.tab-btn:not(#tab-feed)').forEach(b=>b.classList.remove('active'));
 }
+window.addEventListener('resize', ()=>{
+  if(!isMobile()){
+    closeMobDrawer();
+    document.getElementById('mob-drawer').classList.remove('open');
+  }
+});
 
 init();
 </script>
