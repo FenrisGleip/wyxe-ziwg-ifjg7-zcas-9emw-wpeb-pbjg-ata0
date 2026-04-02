@@ -84,91 +84,113 @@ AI/LLM ATTACK FOCUS:
 
 def build_prompt(content: str, category: str) -> str:
     ctx = CATEGORY_CONTEXT.get(category, "")
-    return f"""You are a senior red team operator with 15 years of offensive security experience writing an INTERNAL technical reproduction report.
+    return f"""あなたはオフェンシブセキュリティの専門家（レッドチームオペレーター歴15年）です。
+社内のレッドチームテスター向けに、攻撃者視点で攻撃を再現するための内部技術レポートを作成してください。
 
-AUDIENCE: Red team testers who need to reproduce this attack in a lab environment TODAY. Zero tolerance for vague descriptions.
+対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
 {ctx}
-━━━ STEP 1: NOVELTY SCREENING (do this first, silently) ━━━
-Rate the source article novelty 1-5:
-  5 = New technique/CVE/tool, original research, new bypass not widely known
-  4 = Recent variant of known technique with meaningful new element
-  3 = Known technique with specific target/context details worth documenting
-  2 = General overview of existing technique, no new information
-  1 = Generic educational content, vendor marketing, no technical depth
+━━━ STEP 1: 記事選定（まず実施・出力不要） ━━━
+以下の基準で新規性スコアを1〜5で評価してください:
+  5 = 新規CVE・新技術・オリジナルリサーチ・広く知られていない新バイパス手法
+  4 = 既知技術の有意な新バリアント（新ターゲット・新回避手法・新ツール）
+  3 = 既知手法だが特定環境・設定への具体的な適用事例として価値あり
+  2 = 既知手法の概説、新情報なし
+  1 = 一般的な教育コンテンツ、ベンダーマーケティング、技術的深度なし
 
-If novelty score is 1, 2, or 3: output ONLY this JSON:
-{{"skip": true, "reason": "新規性が低い記事のため除外（スコア3以下）"}}
+選定基準（重要）:
+- 「攻撃者がこれを使って何ができるか」が具体的に書かれているか
+- テスターがラボで試せる具体的な手順・ツール・設定が推測できるか
+- 単なるインシデント報告や製品紹介ではなく、攻撃手法の技術詳細があるか
 
-If novelty score is 4 or 5: write the COMPLETE report below. DO NOT truncate any section.
+スコア1〜3の場合のみ、以下のJSONを出力してください:
+{{"skip": true, "reason": "除外理由を日本語で記載"}}
 
-━━━ STEP 2: FULL REPORT ━━━
+スコア4〜5の場合: 以下のSTEP 2に進んでください。
 
-LANGUAGE REQUIREMENT (ABSOLUTE): Write ALL sections in JAPANESE only.
-- Section headers: use the exact Japanese headers specified below
-- Body text: 100% Japanese. NO English sentences or paragraphs.
-- Technical terms: keep original English for tool names, CVE IDs, API names, command syntax
-- Examples of CORRECT: "このマルウェアはVirtualAllocを使用してシェルコードを展開する"
-- Examples of WRONG: "This malware uses VirtualAlloc to deploy shellcode"
+━━━ STEP 2: レポート作成 ━━━
 
-CRITICAL: Every section must be FULLY written. Never end a section with "..." or mid-sentence.
-If running out of space, shorten ## 検知・防御策 ONLY. Never cut other sections short.
+【言語ルール（絶対遵守）】
+- 全セクションを日本語で記述すること
+- ツール名・CVE ID・APIコール・コマンド構文のみ英語を維持
+- 正例: 「本マルウェアはVirtualAllocExでリモートプロセスにメモリを確保し、WriteProcessMemoryで注入する」
+- 誤例: 「This malware allocates memory using VirtualAllocEx」
+
+【重要】全セクションを最後まで書き切ること。途中で切らないこと。
+スペースが足りない場合は「## 検知・防御策」のみ短縮可。他は絶対に短縮しないこと。
 
 [## 概要]
-- 3〜5文で技術的要点を簡潔にまとめる
-- 末尾に必ず以下のフォーマットで新規性を記載（改行して独立した段落にすること）:
+以下の構成で記述すること:
 
-  **🆕 新規性・差異化ポイント:** 従来のXXX攻撃との具体的な差異を1〜2文で記述。
-  例: "**🆕 新規性・差異化ポイント:** 従来のXXX攻撃はYYYを必要としたが、本手法はZZZのみで実現可能である。"
-  情報不足の場合は既知手法との差異を推定して末尾に [推測] を付与
+1〜2文の核心サマリー（冒頭）:
+「〇〇が報告された。重要なのは〜という点である」の形式で書く。
+例: 「CrystalX RATを用いたMaaS（Malware-as-a-Service）が報告された。重要なのは低スキルでも利用可能なマルウェアサービスとして拡散している点である。」
+
+技術的要点（箇条書き3〜5点）:
+・各点は「何が」「どのように」「なぜ危険か」を1文で表現
+・「高度な」「巧妙な」等の抽象表現は使わず、具体的な動作・仕組みを書く
+
+**🆕 新規性・差異化ポイント:**（独立した段落・太字）
+従来手法との具体的な差異を1〜2文で記述。情報不足の場合は [推測] を付与。
+
+属性情報（判明分のみ、不明は「記載なし」）:
+APT: （脅威アクター名）
+Malware: （マルウェア名）
+CVE: （CVE番号）
+IoC: （ハッシュ・IP・ドメインなど）
 
 [## 脆弱性・脅威の技術的メカニズム]
-- ROOT CAUSEを技術的深度で説明（APIコール名・メモリレイアウト・プロトコルフィールド・コードパス）
+攻撃者視点で「なぜこの攻撃が成立するか」を技術的に説明すること:
+- 脆弱なコンポーネント・設定・ロジックを特定し、悪用の仕組みを説明
+- APIコール名・メモリ操作・プロトコルフィールド・コードパスを具体的に記述
 - CVEの場合: 脆弱なコードパス・トリガー条件・パッチ差分
-- マルウェアの場合: 復号→マッピング→実行の内部フロー
-- 最低200ワード。表面的な説明は不可
+- マルウェアの場合: ロード→復号→実行の各ステップを内部動作レベルで説明
+- 最低300文字。表面的な説明は不可。攻撃者がどう悪用するかの視点を保つこと
 
-[## 再現手順（レッドチームテスター向け）]
-- 番号付きチェックリスト形式
-- 各ステップは具体的アクション（"ツールXをインストール"、"Yフラグ付きでZを実行"）
-- ラボ環境要件・ターゲット前提条件・必要権限を含む
-- 情報不足は知識から補完して [推測] を付与
-- "攻撃者がXをする"禁止。"1. リスナーを立てる: ..."形式
-- 記事内で言及されたテクニック（例: COMハイジャック、ステガノグラフィー、特定のCLSIDへの書き込みなど）は
-  その作成・実装方法を再現手順に必ず含めること。
-  "XというテクニックをYに対して使う"という記述があれば、
-  Xの実装コード・設定手順・必要なツールを具体的に書く
+[## 再現手順（攻撃者視点）]
+攻撃者がこの攻撃を実行する手順を、テスターがそのままラボで追えるよう記述:
+- 冒頭に前提条件（OS・権限・ネットワーク構成）を記載
+- 番号付きチェックリスト（1. 〜 の形）
+- 各ステップ: 「何をするか」+「なぜそれをするか（攻撃上の意図）」を記述
+- 記事に言及されたテクニック（COMハイジャック・ステガノグラフィー・特定CLSID等）は
+  その実装・設定・作成方法を具体的に手順に組み込むこと
+- 記事から読み取れない部分は攻撃者の一般的行動パターンから補完し [推測] を付与
+- 「攻撃者が〜する」形式は禁止。「1. ツールXをインストールする:」形式で書く
 
 [## 実行コマンド・再現コード]
-- コマンドは完全で実行可能。プレースホルダー: IP=192.168.1.10, ドメイン=CORP.LOCAL
-- 記事に登場するコード・スクリプト・ペイロードを必ず再現して記載
-- PoCやエクスプロイトコードがある場合はPython/Bash等の実装例を示す
-- BAD: impacket-secretsdump domain/user@target
-- GOOD: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svcaccount:'P@ssw0rd'@192.168.1.10 -outputfile /tmp/hashes.txt
+- 実際に動作する完全なコマンド・コードのみ記載
+- プレースホルダー: ATTACKER_IP=192.168.1.10, TARGET_IP=192.168.1.20, DOMAIN=CORP.LOCAL
+- 記事に登場するペイロード・スクリプト・設定ファイルを忠実に再現
+- PoCが公開されている場合: そのコアロジックをPython/Bash等で実装例を示す
+- 悪い例: impacket-secretsdump domain/user@target
+- 良い例: impacket-secretsdump -just-dc-ntlm CORP.LOCAL/svc:'P@ssw0rd'@192.168.1.20 -outputfile /tmp/hashes.txt
 
 [## MITRE ATT&CK マッピング]
-サブテクニックIDまで記載（例: T1055.012）
+各テクニックにサブテクニックIDと説明を付けること（例: T1055.012 プロセスホロウィング）
 
 [## 検知・防御策]
-以下の2ブロックで構成すること（見出しはそのまま使用）:
 
 **防御策**
-・具体的な防御策を箇条書き（設定変更・パッチ・権限制限など）
-・最低3項目
+・具体的な設定変更・パッチ・権限制限（最低3項目）
+・「〜を有効にする」「〜を無効化する」形式で具体的に記述
 
 **検知策**
-①検知する場所: EDR / IPS/IDS / NDR / SIEM / Windowsイベントログ など、実際にどのログ取得元で検知できるかを明記
-②IoCをSIEMクエリ形式で記載（KQL / Sigma / SPL のいずれかで最低1つ）
-　例: プロセス名・コマンドライン・通信先IP・レジストリキー・ファイルハッシュ など具体的な値を含めること
+①検知ポイント: この攻撃が検知できるログ取得元を列挙
+　（例: EDRのプロセス生成ログ、Windowsイベントログ4688、NDRのDNSクエリログ）
+②SIEMクエリ（KQL / Sigma / SPL のいずれかで必ず1つ以上）:
+```
+具体的なIoCを含むクエリ（プロセス名・コマンドライン・通信先・レジストリキー等）
+```
 
-OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \\n for newlines.
-IMPORTANT: "title" and "summary_points" must be in JAPANESE. "report" must be entirely in JAPANESE.
+OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \n for newlines in report field.
+IMPORTANT: All text fields must be in JAPANESE. Tool names, CVE IDs, API names, commands may remain in English.
 
-Skip: {{"skip": true, "reason": "理由"}}
+Skip: {{"skip": true, "reason": "除外理由を日本語で記載"}}
 
-Full: {{"title":"日本語ニュース見出し30字以内","summary_points":["技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\\n...\\n## 脆弱性・脅威の技術的メカニズム\\n...\\n## 再現手順（レッドチームテスター向け）\\n1. ...\\n## 実行コマンド・再現コード\\n```bash\\n...\\n```\\n## MITRE ATT&CK マッピング\\n...\\n## 検知・防御策\\n**防御策**\\n・...\\n\\n**検知策**\\n①検知する場所: ...\\n②KQL/Sigma: ```\\n...\\n```"}}
+Full: {{"title":"攻撃の核心を30字以内で表す日本語タイトル","summary_points":["核心サマリー（重要性含む1文）","技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1055.012"],"report":"## 概要\n...\n## 脆弱性・脅威の技術的メカニズム\n...\n## 再現手順（攻撃者視点）\n前提条件: ...\n1. ...\n## 実行コマンド・再現コード\n```bash\n...\n```\n## MITRE ATT&CK マッピング\n...\n## 検知・防御策\n**防御策**\n・...\n\n**検知策**\n①検知ポイント: ...\n②Sigma/KQL:\n```\n...\n```"}}
 
 SOURCE ARTICLE:
 {content[:8000]}"""
+
 
 # ─────────────────────────────────────────────
 # JSON抽出（deepseek-r1の<think>対応を強化）
