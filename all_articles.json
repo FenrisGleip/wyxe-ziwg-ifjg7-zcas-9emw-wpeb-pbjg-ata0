@@ -1,5 +1,22 @@
 [
   {
+    "date": "2026-04-04",
+    "category": "POST_EXP",
+    "title": "Microsoft Active Directory 脆弱性を利用した権限昇格攻撃",
+    "summary_points": [
+      "Microsoft Active Directoryの脆弱性が報告された。この脆弱性は、攻撃者がSYSTEMレベル権限を昇格させ、完全な管理制御を奪取することを可能にする。",
+      "Active Directory Domain Servicesがリソース名を適切に検証または制限しないことが原因",
+      "攻撃者は低レベルの権限とネットワークアクセスでSYSTEMレベル権限を昇格可能"
+    ],
+    "poc_url": "",
+    "cvss_score": "8.8",
+    "mitre_ids": [
+      "T1068"
+    ],
+    "content": "## 概要\n\nMicrosoft Active Directoryの脆弱性が報告された。この脆弱性は、攻撃者がSYSTEMレベル権限を昇格させ、完全な管理制御を奪取することを可能にする。\n\n技術的要点:\n* Active Directory Domain Servicesがリソース名を適切に検証または制限しないことが原因\n* 攻撃者は低レベルの権限とネットワークアクセスでSYSTEMレベル権限を昇格可能\n* この脆弱性はCWE-641に分類され、ファイルおよびその他のリソースの名前の不適切な制限に関連\n\n**🆕 新規性・差異化ポイント:** \n従来のActive Directoryの脆弱性と比べて、攻撃者が低レベルの権限でSYSTEMレベル権限を昇格できる点が新しい。\n\n属性情報:\nAPT: 記載なし\nMalware: 記載なし\nCVE: CVE-2026-25177\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nこの脆弱性は、Active Directory Domain Servicesがリソース名を適切に検証または制限しないことに起因する。攻撃者は、ネットワークアクセスと低レベルの権限を利用して、SYSTEMレベル権限を昇格することができる。\n\n具体的には、攻撃者は悪意のあるリソース名をActive Directoryに登録し、それを利用してSYSTEMレベル権限を昇格する。この脆弱性は、CWE-641に分類され、ファイルおよびその他のリソースの名前の不適切な制限に関連する。\n\n## 再現手順（攻撃者視点）\n\n前提条件: \n* Windows Server 2019以降のActive Directory環境\n* 低レベルの権限を持つアカウント\n* ネットワークアクセス\n\n1. 悪意のあるリソース名を作成し、Active Directoryに登録する。\n2. 登録したリソース名を利用して、SYSTEMレベル権限を昇格する。\n\n## 実行コマンド・再現コード\n\n```bash\n# 悪意のあるリソース名を作成\nmsdtc -install -y\n\n# 登録したリソース名を利用してSYSTEMレベル権限を昇格\nsc.exe create \"MaliciousSvc\" binPath= \"C:\\Windows\\System32\\cmd.exe /c net localgroup administrators <username> /add\" \nsc.exe start \"MaliciousSvc\"\n```\n\n## MITRE ATT&CK マッピング\n\n* T1068: 権限昇格\n* T1203: Active Directoryの悪用\n\n## 検知・防御策\n\n**防御策**\n・Active Directoryの最新パッチを適用する。\n・ネットワークアクセスを制限する。\n・低レベルの権限を持つアカウントの権限を制限する。\n\n**検知策**\n①検知ポイント: \n* Windowsイベントログ4688\n* Active Directoryのログ\n\n②Sigma:\n```\ntitle: Detect MaliciousSvc Creation\ndescription: Detect creation of malicious service\nlogsource:\n  - Windows Event Log\ndetection:\n  - selection:\n      EventID: 4688\n      CommandLine: 'sc.exe create MaliciousSvc'\n  - condition: selection\n```",
+    "url": "https://gbhackers.com/microsoft-active-directory-flaw/"
+  },
+  {
     "date": "2026-04-03",
     "category": "POST_EXP",
     "title": "CVE-2026-25177 を悪用した特権昇格攻撃",
