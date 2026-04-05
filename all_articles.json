@@ -1,5 +1,22 @@
 [
   {
+    "date": "2026-04-05",
+    "category": "MALWARE",
+    "title": "Viteの脆弱性を利用したファイルアクセス攻撃",
+    "summary_points": [
+      "Viteの'@@fs'機能を利用してサーバーのファイルシステムにアクセスする攻撃が報告された。",
+      "攻撃者は'??raw?'サフィックスを使用してアクセスリストをバイパスし、任意のファイルをダウンロードする。",
+      "Viteは通常ポート5173で動作するが、攻撃者は標準のWebサーバーポートを使用している。"
+    ],
+    "poc_url": "",
+    "cvss_score": "7.5",
+    "mitre_ids": [
+      "T1190"
+    ],
+    "content": "## 概要\nViteの'@@fs'機能を利用したファイルアクセス攻撃が報告された。この攻撃はViteの脆弱性CVE-2025-30208を利用する。重要なのは、攻撃者が'??raw?'サフィックスを使用してアクセスリストをバイパスし、任意のファイルをダウンロードできる点である。\n\n## 脆弱性・脅威の技術的メカニズム\nViteの'@@fs'機能は、サーバーのファイルシステムからファイルを取得するために使用される。しかし、この機能にはアクセスリストを制限する設定が不十分である。攻撃者は'??raw?'サフィックスを使用してアクセスリストをバイパスし、任意のファイルをダウンロードすることができる。具体的には、以下のようなURLを使用する:\n- /@fs/../../../../../etc/environment?raw??\n- /@fs/etc/environment?raw??\n- /@fs/home/app/.aws/credentials?raw??\n\n## 攻撃再現ガイド\n■ 前提条件・環境\n- Viteがポート5173で動作していること\n- アクセスリストが不十分であること\n- 攻撃者は標準のWebサーバーポートを使用する\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 攻撃者はViteの'@@fs'機能を使用するURLを構築する\n【目的】: アクセスリストをバイパスし、任意のファイルをダウンロードする\n【結果】: 攻撃者はサーバーのファイルシステムにアクセスし、機密情報を取得する\n\n■ 具体的な実装・設定の詳細\n- URL: /@fs/../../../../../etc/environment?raw??\n- サフィックス: ??raw??\n\n## IoC・痕跡情報\n- URLパターン: /@fs/*?raw??\n- アクセス先ファイル: /etc/environment、/home/app/.aws/credentialsなど\n\n## MITRE ATT&CK マッピング\n- T1190: Exploit Public-Facing Application\n\n## 検知・防御策\n**防御策**\n・Viteの設定でアクセスリストを適切に制限する\n・ポート5173をローカルホストからのみアクセス可能にする\n・'??raw?'サフィックスを使用したアクセスを制限する\n\n**検知策**\n①検知ポイント: Webサーバーログ、ネットワークトラフィックログ\n②Sigma:\n```\ntitle: Vite File Access\nstatus: test\nlogsource:\n    - webserver\n    - network\ntype: detection\n\nfilter:\n    - url.path: '/@fs/*?raw??'\n    - http.method: 'GET'\n\nrule:\n    - filter\n```",
+    "url": "https://isc.sans.edu/diary/rss/32860"
+  },
+  {
     "date": "2026-04-04",
     "category": "POST_EXP",
     "title": "Microsoft Active Directory 脆弱性を利用した権限昇格攻撃",
