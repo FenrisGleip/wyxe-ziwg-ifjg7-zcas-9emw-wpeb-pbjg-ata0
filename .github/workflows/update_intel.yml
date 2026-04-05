@@ -1,4 +1,4 @@
-name: RT-Intel Daily Update
+name: CIPHER Daily Intel Update
 
 on:
   schedule:
@@ -16,7 +16,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # GitHub Pages用ブランチを使っている場合は branch: gh-pages に変更
           fetch-depth: 1
 
       - name: Set up Python
@@ -25,12 +24,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install tavily-python groq
+        run: pip install groq
 
       - name: Run intel agent
         env:
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python main.py
 
       - name: Commit and push updated files
@@ -38,6 +36,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add all_articles.json articles.js index.html log.html log.js run_log.json
-          # 変更がない場合はコミットしない（エラー回避）
           git diff --staged --quiet || git commit -m "chore: update intel feed $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
