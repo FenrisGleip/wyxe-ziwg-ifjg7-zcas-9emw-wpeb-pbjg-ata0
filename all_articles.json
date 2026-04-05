@@ -1,5 +1,39 @@
 [
   {
+    "date": "2026-04-06",
+    "category": "MALWARE",
+    "title": "TeamPCPのサプライチェーンキャンペーンが欧州委員会のクラウド環境に影響",
+    "summary_points": [
+      "「TeamPCPのサプライチェーンキャンペーンが欧州委員会のクラウド環境に影響を与えたことが報告された。重要なのは、攻撃者がTrivyの脆弱性を悪用してAWS APIキーを盗み、欧州委員会のクラウド環境に侵入した点である。」",
+      "攻撃者はTrivyの脆弱性（CVE-2026-33634）を悪用してAWS APIキーを盗んだ",
+      "盗まれたAPIキーを使用して欧州委員会のクラウド環境に侵入し、340GBのデータを盗んだ"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055.012"
+    ],
+    "content": "## 概要\n\n「TeamPCPのサプライチェーンキャンペーンが欧州委員会のクラウド環境に影響を与えたことが報告された。重要なのは、攻撃者がTrivyの脆弱性を悪用してAWS APIキーを盗み、欧州委員会のクラウド環境に侵入した点である。」\n\n技術的要点:\n\n* 攻撃者はTrivyの脆弱性（CVE-2026-33634）を悪用してAWS APIキーを盗んだ\n* 盗まれたAPIキーを使用して欧州委員会のクラウド環境に侵入した\n* 攻撃者は340GBのデータを盗み、うち52,000件のメール関連ファイルが流出した\n\n**🆕 新規性・差異化ポイント:** \n従来のキャンペーンでは、攻撃者は主に民間企業をターゲットにしていたが、今回の攻撃では欧州委員会のクラウド環境がターゲットにされた点が新しい。\n\n属性情報:\nAPT: TeamPCP\nMalware: 記載なし\nCVE: CVE-2026-33634\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\n攻撃者はTrivyの脆弱性（CVE-2026-33634）を悪用してAWS APIキーを盗んだ。Trivyはコンテナの脆弱性をスキャンするツールであり、今回の攻撃ではこのツールがコンポーネントとして使用された。\n\n攻撃者は盗まれたAWS APIキーを使用して欧州委員会のクラウド環境に侵入し、340GBのデータを盗んだ。攻撃者はデータの流出を防ぐために、 AWSアカウントへのアクセスを制限した。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n* AWSアカウントとTrivyの脆弱性（CVE-2026-33634）が存在する環境\n* 攻撃者がAWS APIキーを盗むことができる環境\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】Trivyの脆弱性（CVE-2026-33634）を悪用してAWS APIキーを盗む\n【目的】AWSアカウントへのアクセスを得るため\n【結果】AWS APIキーが盗まれる\n\n【フェーズ2: 実行】\n【操作】盗まれたAWS APIキーを使用して欧州委員会のクラウド環境に侵入する\n【目的】データを盗むため\n【結果】340GBのデータが盗まれる\n\n## IoC・痕跡情報\n* ハッシュ値: 記載なし\n* C2ドメイン・IP: 記載なし\n* 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n* T1055.012: プロセスホロウィング\n\n## 検知・防御策\n\n**防御策**\n・Trivyの脆弱性（CVE-2026-33634）をパッチする\n・AWSアカウントへのアクセスを制限する\n・データを暗号化する\n\n**検知策**\n①検知ポイント: AWSアカウントのログ、Trivyのログ\n②Sigma/KQL:\n```\nindex=aws_logs sourcetype=aws_api_call action=authenticate\n| stats count by user_name\n| where count > 1\n```\n注: 上記のクエリは一例であり、実際の検知にはカスタマイズが必要である。",
+    "url": "https://isc.sans.edu/diary/rss/32864"
+  },
+  {
+    "date": "2026-04-06",
+    "category": "INITIAL",
+    "title": "Fortinet Patches Actively Exploited CVE-2026-35616 in FortiClient EMS",
+    "summary_points": [
+      "Fortinetは、FortiClient EMSの脆弱性CVE-2026-35616を悪用した攻撃が報告されていることを明らかにした。",
+      "この脆弱性は、APIアクセス制御の不備により、認証されていない攻撃者がコードやコマンドを実行可能にする。",
+      "FortiClient EMSのバージョン7.4.5から7.4.6に影響する。"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.1",
+    "mitre_ids": [
+      "T1190"
+    ],
+    "content": "## 概要\n\nFortinetは、FortiClient EMSの脆弱性CVE-2026-35616を悪用した攻撃が報告されていることを明らかにした。この脆弱性は、APIアクセス制御の不備により、認証されていない攻撃者がコードやコマンドを実行可能にする。\n\n技術的要点:\n- 認証前にAPIアクセス制御が不備\n- 攻撃者がコードやコマンドを実行可能\n- FortiClient EMSのバージョン7.4.5から7.4.6に影響\n- CVSSスコアは9.1\n\n**新規性・差異化ポイント:** \n**既知の脆弱性だが、新たな悪用手法が報告されている。**\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2026-35616\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nCVE-2026-35616は、FortiClient EMSのAPIアクセス制御に不備がある脆弱性である。攻撃者は、特別に細工されたリクエストを使用することで、認証を回避し、システム上でコードやコマンドを実行することができる。\n\n具体的には、攻撃者はAPIリクエストを細工し、認証トークンを偽装することで、通常は制限されている操作を実行する。この脆弱性は、APIのアクセス制御が不十分であるために発生する。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n\n- FortiClient EMSバージョン7.4.5または7.4.6がインストールされた環境\n- 攻撃者はインターネットに接続可能\n\n### 攻撃フロー\n\n【フェーズ1: 準備】\n- 攻撃者は細工されたAPIリクエストを作成\n\n【操作】: 特別に細工されたAPIリクエストをFortiClient EMSに送信\n【目的】: 認証を回避し、コードやコマンドを実行可能にする\n【結果】: 攻撃者はシステム上で任意のコードを実行可能になる\n\n## IoC・痕跡情報\n\n- 記事中に記載されたIoCなし\n\n## MITRE ATT&CK マッピング\n\n- T1190: Exploit Public-Facing Application\n\n## 検知・防御策\n\n**防御策**\n- FortiClient EMSを最新バージョンにアップデート\n- 不正なAPIリクエストを検知するためのログ監視を実施\n\n**検知策**\n①検知ポイント: FortiClient EMSのログ、ネットワークトラフィック\n②Sigma:\n```\ntitle: Detect CVE-2026-35616 Exploitation Attempts\ndescription: Detect exploitation attempts for CVE-2026-35616\nlogsource:\n  - product: forticlient\n  - category: web\ndetection:\n  - alert when http_method is \"POST\" and uri_path contains \"/api/v1/\"\n```",
+    "url": "https://thehackernews.com/2026/04/fortinet-patches-actively-exploited-cve.html"
+  },
+  {
     "date": "2026-04-05",
     "category": "MALWARE",
     "title": "Viteの脆弱性を利用したファイルアクセス攻撃",
