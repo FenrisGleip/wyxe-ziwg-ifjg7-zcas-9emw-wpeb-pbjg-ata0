@@ -19,6 +19,8 @@ def now_jst():
 # 設定
 # ─────────────────────────────────────────────
 GROQ_KEY    = os.getenv("GROQ_API_KEY")
+if not GROQ_KEY:
+    raise RuntimeError("GROQ_API_KEY が未設定です。GitHub Secrets を確認してください。")
 groq_client = Groq(api_key=GROQ_KEY)
 
 MASTER_DATA      = "all_articles.json"
