@@ -1,5 +1,149 @@
 [
   {
+    "date": "2026-04-07",
+    "category": "MALWARE",
+    "title": "TeamPCPキャンペーンの脅威インテリジェンスレポート",
+    "summary_points": [
+      "LiteLLMのサプライチェーン侵害により、多数の組織が影響を受ける。",
+      "攻撃者は、Tailscale VPNの資格情報を悪用して初期アクセスを獲得。",
+      "盗まれた資格情報は、データ窃盗や恐喝に積極的に悪用されている。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1190",
+      "T1566",
+      "T1003"
+    ],
+    "content": "## 概要\n\n「TeamPCPキャンペーンの脅威インテリジェンスレポート」が更新され、LiteLLMサプライチェーンの侵害が確認された。Mercor AIが、LiteLLMの侵害によりデータ漏洩を被ったことを初めて公式に認めた。\n\n技術的要点:\n\n*   LiteLLMのサプライチェーン侵害により、多数の組織が影響を受ける。\n*   攻撃者は、Tailscale VPNの資格情報を悪用して初期アクセスを獲得。\n*   盗まれた資格情報は、データ窃盗や恐喝に積極的に悪用されている。\n\n**🆕 新規性・差異化ポイント:** Mercor AIの公式な被害認定は、TeamPCPキャンペーンの実際の被害を初めて確認したものである。\n\n属性情報:\n\n*   APT: TeamPCP\n*   Malware: LiteLLM\n*   CVE: 記載なし\n*   IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\n攻撃者は、LiteLLMのサプライチェーン侵害により、Tailscale VPNの資格情報を取得した。 この資格情報を使って、Mercor AIのシステムにアクセスし、約4TBのデータを漏洩した。\n\n*   攻撃者は、TruffleHogというオープンソースのシークレットスキャンツールを使用して、盗まれたAWSアクセスキーやAzureアプリケーションシークレットを検証する。\n*   攻撃者は、24時間以内に、盗まれたシークレットを検証し、侵害されたAWS環境でのディスカバリー操作に移行する。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n\n*   必要なOS: 記載なし\n*   必要なツール・サービス: LiteLLM v1.82.7またはv1.82.8、Tailscale VPN\n*   攻撃対象の前提状態: LiteLLMを使用していること\n\n### 攻撃フロー\n\n#### フェーズ1: 準備\n\n*   【操作】: LiteLLMのサプライチェーン侵害により、Tailscale VPNの資格情報を取得する。\n*   【目的】: Mercor AIのシステムにアクセスするため。\n*   【結果】: 盗まれた資格情報が取得される。\n\n#### フェーズ2: 実行\n\n*   【操作】: 盗まれた資格情報を使って、Mercor AIのシステムにアクセスする。\n*   【目的】: データを漏洩するため。\n*   【結果】: 約4TBのデータが漏洩する。\n\n## IoC・痕跡情報\n\n*   ハッシュ値: 記載なし\n*   C2ドメイン・IP: 記載なし\n*   特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n\n*   T1190: Exploit Public-Facing Application\n*   T1566: Phishing\n*   T1003: OS Credential Dumping\n\n## 検知・防御策\n\n**防御策**\n\n*   LiteLLMの最新バージョンにアップグレードする。\n*   Tailscale VPNの資格情報を定期的にローテーションする。\n*   AWSアクセスキーやAzureアプリケーションシークレットを定期的にローテーションする。\n\n**検知策**\n\n①検知ポイント: \n\n*   EDRのプロセス生成ログ\n*   Windowsイベントログ4688\n*   NDRのDNSクエリログ\n\n②Sigma/KQL:\n```\nprocess_creation\n  | where process_name == \"LiteLLM\"\n  | where command_line == \"*--version*1.82.7*\"\n```",
+    "url": "https://isc.sans.edu/diary/rss/32856"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "INITIAL",
+    "title": "OWASP CRSのホワイトスペースパディングバイパス脆弱性",
+    "summary_points": [
+      "OWASP CRSでファイル名のホワイトスペースパディングを利用したファイルアップロード拡張子チェックバイパス脆弱性が報告された。重要なのは攻撃者がCRSの保護を回避し、Webシェルをアップロードでき",
+      "攻撃者はファイル名にホワイトスペースパディングを加えることで、.phpや.pharなどの危険なファイルのアップロードが可能になる",
+      "この脆弱性はWindowsバックエンドでより実用的な攻撃が可能である",
+      "Linuxではバックエンドがホワイトスペーストリミングメソッドを使用する場合にのみ脆弱である"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1190"
+    ],
+    "content": "## 概要\n\nOWASP CRSでファイル名のホワイトスペースパディングを利用したファイルアップロード拡張子チェックバイパス脆弱性が報告された。重要なのは攻撃者がCRSの保護を回避し、Webシェルをアップロードできる点である。\n\n技術的要点:\n- 攻撃者はファイル名にホワイトスペースパディングを加えることで、.phpや.pharなどの危険なファイルのアップロードが可能になる\n- この脆弱性はWindowsバックエンドでより実用的な攻撃が可能である\n- Linuxではバックエンドがホワイトスペーストリミングメソッドを使用する場合にのみ脆弱である\n- 脆弱性はCVE-2026-33691として識別される\n\n**🆕 新規性・差異化ポイント:**\n従来のOWASP CRSの脆弱性と異なる点は、ホワイトスペースパディングを利用してファイルアップロード拡張子チェックをバイパスする点である。[推測]\n\n属性情報（判明分のみ、不明は「記載なし」）:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2026-33691\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\n攻撃者視点で「なぜこの攻撃が成立するか」を技術的に説明する:\n- 脆弱なコンポーネント: OWASP CRSのファイルアップロード拡張子チェック\n- 設定・ロジック: ファイル名のホワイトスペースパディングを利用したバイパス\n- APIコール名・メモリ操作・プロトコルフィールド・コードパス: 具体的なAPIコールやコードパスは不明\n- CVE-2026-33691: 脆弱なコードパスはファイル名のトリミング処理であると推測される\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 必要なOS: WindowsまたはLinux\n- 必要なツール・サービス: OWASP CRSが導入されたWebアプリケーション\n- 攻撃対象の前提状態: ファイルアップロード機能が存在し、OWASP CRSが導入されていること\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 攻撃者はファイル名にホワイトスペースパディングを加えたファイルを準備する\n【目的】: ファイルアップロード拡張子チェックをバイパスすること\n【結果】: 攻撃者は危険なファイル（.phpや.pharなど）をアップロードできる可能性がある\n\n【フェーズ2: 実行】\n【操作】: 攻撃者は準備したファイルをWebアプリケーションにアップロードする\n【目的】: Webシェルを動作させること\n【結果】: 攻撃者はWebシェルを動作させ、サーバーへのアクセスやコマンド実行が可能になる可能性がある\n\n■ 具体的な実装・設定の詳細\n- ファイル名のホワイトスペースパディング: ファイル名にスペースやタブなどのホワイトスペースを加えることで、ファイルアップロード拡張子チェックをバイパスする\n- 具体的なファイル名: 例えば「.php 」（スペースが入っている）などのファイル名を使用する\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: 記載なし\n- 特徴的なパターン: ファイル名のホワイトスペースパディング\n\n## MITRE ATT&CK マッピング\n- T1190: Exploit Public-Facing Application\n\n## 検知・防御策\n\n**防御策**\n・ OWASP CRSを最新バージョン（v3.3.9, v4.25.x LTS, v4.8.x）に更新する\n・ ファイルアップロード機能の制限: ファイルタイプを制限し、実行可能なファイルをアップロードできないようにする\n・ Webアプリケーションのセキュリティ設定: Webアプリケーションのセキュリティ設定を見直し、ファイルアップロードに関する制限を強化する\n\n**検知策**\n①検知ポイント: Webアプリケーションのログ、OWASP CRSのログ\n②Sigma/KQL: `index=web_logs | where file_name =~ '.*\\s+\\.php'`",
+    "url": "https://seclists.org/fulldisclosure/2026/Apr/0"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "INITIAL",
+    "title": "Labcenter Electronics Proteus PDSPRJ ファイルパースィングにおける型混乱による遠隔コード実行脆弱性",
+    "summary_points": [
+      "CVE-2026-5496は、Labcenter Electronics ProteusのPDSPRJファイルパースィングに存在する型混乱脆弱性である。",
+      "この脆弱性は、ユーザーが悪意のあるページを訪問したり、悪意のあるファイルを開いたりすることで悪用される可能性がある。",
+      "攻撃者は、この脆弱性を悪用して、現在のプロセスのコンテキストでコードを実行することができる。"
+    ],
+    "poc_url": "",
+    "cvss_score": "7.8",
+    "mitre_ids": [
+      "T1203",
+      "T1059.001"
+    ],
+    "content": "## 概要\n\nCVE-2026-5496は、Labcenter Electronics ProteusのPDSPRJファイルパースィングに存在する型混乱脆弱性である。重要なのは、ユーザーが悪意のあるページを訪問したり、悪意のあるファイルを開いたりすることで悪用される可能性がある点である。\n\n技術的要点:\n- この脆弱性は、PDSPRJファイルの解析時にユーザーから提供されたデータの検証が不適切であることに起因する型混乱条件の結果である。\n- 攻撃者は、この脆弱性を悪用して、現在のプロセスのコンテキストでコードを実行することができる。\n- ユーザーとの対話が、この脆弱性を悪用するために必要である。\n\n**🆕 新規性・差異化ポイント:**\nこの脆弱性は、Proteusソフトウェアの特定のファイルパースィング機能に存在する型混乱脆弱性である。[推測]\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2026-5496\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nこの脆弱性は、Labcenter Electronics ProteusソフトウェアのPDSPRJファイルパースィング機能に存在する。脆弱性は、ユーザーから提供されたデータの検証が不適切であることに起因する型混乱条件の結果である。攻撃者は、この脆弱性を悪用して、現在のプロセスのコンテキストでコードを実行することができる。\n\n具体的には、Proteusソフトウェアは、PDSPRJファイルを解析する際に、ユーザーから提供されたデータの検証を行わない。これにより、攻撃者は、悪意のあるPDSPRJファイルをを作成し、ユーザーを騙して開かせることで、コードを実行することができる。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 必要なOS: Windows\n- 必要なソフトウェア: Labcenter Electronics Proteus\n- 必要なツール: 悪意のあるPDSPRJファイルを作成するツール\n- 攻撃対象の前提状態: Proteusソフトウェアがインストールされ、PDSPRJファイルを開くことができる状態\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 悪意のあるPDSPRJファイルを作成する\n【目的】: ユーザーを騙して悪意のあるPDSPRJファイルを開かせる\n【結果】: 悪意のあるPDSPRJファイルが開かれ、コードが実行される\n\n【フェーズ2: 実行】\n【操作】: 悪意のあるPDSPRJファイルを解析する\n【目的】: 型混乱条件を発生させる\n【結果】: コードが実行される\n\n■ 具体的な実装・設定の詳細\n- 悪意のあるPDSPRJファイルを作成するには、特定のツールを使用する必要がある。[推測]\n- Proteusソフトウェアの設定を変更する必要はない。\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: 記載なし\n- 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n- T1203: 遠隔コード実行\n- T1059.001: コード実行\n\n## 検知・防御策\n\n**防御策**\n・ Proteusソフトウェアを最新バージョンに更新する\n・ PDSPRJファイルを開く前に、ウイルススキャンを実行する\n・ ユーザーを教育し、悪意のあるファイルを開かないようにする\n\n**検知策**\n①検知ポイント: EDRのプロセス生成ログ、Windowsイベントログ4688\n②Sigma/KQL:\n```\nprocess_creation\n| where process_name == \"Proteus.exe\"\n| where command_line == \"%{malicious_command_line}\"",
+    "url": "http://www.zerodayinitiative.com/advisories/ZDI-26-254/"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "INITIAL",
+    "title": "ハードコードされたパスワードを使用したYokogawa CENTUM VPの脆弱性",
+    "summary_points": [
+      "Yokogawa CENTUM VPの脆弱性（CVE-2025-7741）が報告された。重要なのは、攻撃者がPROGユーザーとしてログインし、権限を変更できる点である。",
+      "脆弱性はハードコードされたパスワードの使用による。",
+      "影響を受ける製品はCENTUM VP R5.01.00以降、R6.01.00以降、vR7.01.00である。"
+    ],
+    "poc_url": "",
+    "cvss_score": "4",
+    "mitre_ids": [
+      "T1552.004"
+    ],
+    "content": "## 概要\nYokogawa CENTUM VPの脆弱性（CVE-2025-7741）が報告された。重要なのは、攻撃者がPROGユーザーとしてログインし、権限を変更できる点である。\n\n技術的要点:\n- 脆弱性はハードコードされたパスワードの使用による\n- 影響を受ける製品はCENTUM VP R5.01.00以降、R6.01.00以降、vR7.01.00である\n- 攻撃者はHIS画面制御へのアクセス権を持っている必要がある\n- デフォルトのPROGユーザーの権限はS1（OFFUSERと同等）である\n\n**🆕 新規性・差異化ポイント:**\n従来のハードコードされたパスワードを使用する脆弱性と同様であるが、影響を受ける製品が広範囲にわたる点が異なる。[推測]\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2025-7741\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\nYokogawa CENTUM VPは、システム内のCENTUM認証モードで使用されるユーザーアカウント（PROG）のハードコードされたパスワードを含んでいる。攻撃者は、以下の条件下でPROGユーザーとしてログインできる可能性がある。\n\n- 攻撃者はHIS画面制御へのアクセス権を持っている必要がある\n- デフォルトのPROGユーザーの権限はS1（OFFUSERと同等）である\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 影響を受けるバージョンのYokogawa CENTUM VP\n- HIS画面制御へのアクセス権\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 影響を受けるバージョンのYokogawa CENTUM VPにアクセスする\n【目的】: ハードコードされたパスワードを使用してPROGユーザーとしてログインする\n【結果】: PROGユーザーとしてログインし、権限を変更できる\n\n【フェーズ2: 実行】\n【操作】: ログイン後、権限を変更する\n【目的】: 攻撃者が任意の操作を実行できるようにする\n【結果】: 攻撃者が任意の操作を実行できる\n\n■ 具体的な実装・設定の詳細\n- ハードコードされたパスワードは、システム内のCENTUM認証モードで使用されるユーザーアカウント（PROG）に設定されている\n- 攻撃者は、HIS画面制御へのアクセス権を持っている必要がある\n\n## IoC・痕跡情報\n- 記事中に記載なし\n\n## MITRE ATT&CK マッピング\n- T1552.004: ハードコードされたパスワードの使用\n\n## 検知・防御策\n**防御策**\n・影響を受けるバージョンのユーザーは、Windows認証モードに変更することを推奨\n・CENTUM VP R5.01.00からR5.04.20: Windows認証モードに変更\n・CENTUM VP R6.01.00からR6.12.00: Windows認証モードに変更\n・CENTUM VP R7.01.00: パッチソフトウェアR7.01.10を適用\n\n**検知策**\n①検知ポイント: システムログ、ネットワークログ\n②Sigma/KQL: \n```\ntitle: Yokogawa CENTUM VP Hardcoded Password\nquery: `process where process_name = 'CENTUM VP' and command_line = '*PROG*' `\n```\n",
+    "url": "https://www.cisa.gov/news-events/ics-advisories/icsa-26-092-02"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "INITIAL",
+    "title": "Hitachi Energy EllipseにおけるJasper ReportのJava脱列挙処理の脆弱性を利用した遠隔コード実行攻撃",
+    "summary_points": [
+      "Hitachi Energy Ellipseで使用されるJasper Reportコンポーネントに、Java脱列挙処理の脆弱性が存在する。",
+      "この脆弱性は、外部から供給されたデータを適切に処理できず、攻撃者が遠隔から任意のコードを実行可能にする。",
+      "影響を受ける製品はEllipse 9.0.50およびそれ以前のバージョンである。",
+      "CVE-2025-10492として識別され、CVSSスコアは9.8である。"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1203",
+      "T1059"
+    ],
+    "content": "## 概要\nHitachi Energy Ellipseで使用されるJasper Reportコンポーネントに、Java脱列挙処理の脆弱性が存在することが報告された。この脆弱性は、外部から供給されたデータを適切に処理できず、攻撃者が遠隔から任意のコードを実行可能にする。重要なのは、この脆弱性が悪用されると、攻撃者がシステムへの遠隔コード実行を可能にする点である。\n\n技術的要点:\n- Jasper Reportコンポーネントが使用するJava脱列挙処理に脆弱性が存在する\n- 外部から供給されたデータを適切に処理できず、攻撃者が遠隔から任意のコードを実行可能にする\n- 影響を受ける製品はEllipse 9.0.50およびそれ以前のバージョンである\n- CVE-2025-10492として識別され、CVSSスコアは9.8である\n\n**🆕 新規性・差異化ポイント:**\n従来のJava脱列挙処理の脆弱性と同様であるが、Jasper Reportコンポーネントの使用による影響が大きい点が異なる。[推測]\n\n属性情報:\nAPT: 記載なし\nMalware: 記載なし\nCVE: CVE-2025-10492\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\nJasper Reportコンポーネントが使用するJava脱列挙処理に脆弱性が存在する。この脆弱性は、外部から供給されたデータを適切に処理できず、攻撃者が遠隔から任意のコードを実行可能にする。具体的には、Jasper Reportコンポーネントが使用するJavaの脱列挙処理において、外部から供給されたデータを適切に検証せずに処理することで、攻撃者が任意のコードを実行可能にする。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 影響を受ける製品: Hitachi Energy Ellipse 9.0.50およびそれ以前のバージョン\n- 必要なツール・サービス: 攻撃者が遠隔からアクセスできる環境\n- 攻撃対象の前提状態: Jasper Reportコンポーネントが使用可能であること\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 攻撃者は、脆弱性が存在するJasper Reportコンポーネントにアクセスするための環境を準備する\n【目的】: 脆弱性が存在するコンポーネントにアクセスし、悪用する\n【結果】: 攻撃者は、脆弱性が存在するコンポーネントにアクセス可能になる\n\n【フェーズ2: 実行】\n【操作】: 攻撃者は、外部から供給されたデータを適切に処理できず、任意のコードを実行する\n【目的】: 攻撃者は、システムへの遠隔コード実行を可能にする\n【結果】: 攻撃者は、システムへの遠隔コード実行を可能にする\n\n■ 具体的な実装・設定の詳細\nJasper Reportコンポーネントが使用するJava脱列挙処理に脆弱性が存在する。この脆弱性は、外部から供給されたデータを適切に処理できず、攻撃者が遠隔から任意のコードを実行可能にする。具体的には、Jasper Reportコンポーネントが使用するJavaの脱列挙処理において、外部から供給されたデータを適切に検証せずに処理することで、攻撃者が任意のコードを実行可能にする。\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: 記載なし\n- 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n- T1203: 遠隔コード実行\n- T1059: コマンドとコントロール\n\n## 検知・防御策\n**防御策**\n・Jasper Reportコンポーネントのアップデートを行う\n・外部から供給されたデータの検証を適切に行う\n・システムへの遠隔アクセスを制限する\n\n**検知策**\n①検知ポイント: システムのログ取得元\n②Sigma/KQL:\n```\nprocess_creation | where process_name == \"java.exe\" and command_line == \"*JasperReport*\"\n```",
+    "url": "https://www.cisa.gov/news-events/ics-advisories/icsa-26-092-03"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "POST_EXP",
+    "title": "Elastic社のHigher-Order Rulesを用いた攻撃検出",
+    "summary_points": [
+      "Elastic社のセキュリティチームが、複数のデータセットや環境にわたる動作検出ルールを運用している。",
+      "彼らがHigher-Order Rules（HOR）を構築し、関連するアラートを時間的、またはコンテキストに基づいて相関させることで、攻撃の検出精度を向上させている。",
+      "Entity-Based Correlation、Cross–Data Source Visibility、Time and Prevalence Awarenessという3つの設計原則に基づいて構築"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1566.001",
+      "T1059.001"
+    ],
+    "content": "## 概要\n\nElastic社のセキュリティチームが、複数のデータセットや環境にわたる動作検出ルールを運用していることが報告された。重要なのは、彼らがHigher-Order Rules（HOR）を構築し、関連するアラートを時間的、またはコンテキストに基づいて相関させることで、攻撃の検出精度を向上させている点である。\n\n技術的要点:\n・Elastic社は、Building Block RulesとHigher-Order Rulesの2種類の検出ルールを運用している。\n・Higher-Order Rulesは、アラートを入力として使用し、他のアラートとの相関関係を検出する。\n・Entity-Based Correlation、Cross–Data Source Visibility、Time and Prevalence Awarenessという3つの設計原則に基づいて構築されている。\n\n**🆕 新規性・差異化ポイント:** \n従来の検出ルールは単一の動作を検出するように設計されていたが、Higher-Order Rulesは複数のアラートを相関させることで、より高度な攻撃を検出できる。 \n\n属性情報:\nAPT: 記載なし\nMalware: 記載なし\nCVE: 記載なし\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nElastic社のセキュリティチームは、Building Block RulesとHigher-Order Rulesを組み合わせて使用することで、攻撃の検出精度を向上させている。Building Block Rulesは単一の動作を検出するように設計されているが、Higher-Order Rulesは複数のアラートを相関させることで、より高度な攻撃を検出できる。\n\nHigher-Order Rulesは、Entity-Based Correlation、Cross–Data Source Visibility、Time and Prevalence Awarenessという3つの設計原則に基づいて構築されている。Entity-Based Correlationは、共有エンティティ（ホスト、ユーザー、ソースIPなど）に基づいてアクティビティを相関させる。Cross–Data Source Visibilityは、異なるデータソース（エンドポイント、ネットワーク、メールなど）からのシグナルを組み合わせることで、マルチステージの攻撃を検出する。Time and Prevalence Awarenessは、時間的ロジックと普及度に基づくロジックを使用して、異常な動作を検出する。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 必要なOS: 記載なし\n- 必要なネットワーク構成: 記載なし\n- 必要なアカウント種別: 記載なし\n- 必要な権限レベル: 記載なし\n- 必要なツール・サービス: Elastic社のセキュリティツール\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】Building Block Rulesを構成し、Higher-Order Rulesを構築する。\n【目的】攻撃の検出精度を向上させる。\n【結果】複数のアラートが相関され、より高度な攻撃が検出される。\n\n【フェーズ2: 実行】\n【操作】Higher-Order Rulesを使用して、攻撃を検出する。\n【目的】攻撃の検出精度を向上させる。n【結果】異常な動作が検出される。\n\n## IoC・痕跡情報\n記事中に記載なし\n\n## MITRE ATT&CK マッピング\nT1566.001: Phishing: Spearphishing Attachment\nT1059.001: Command and Scripting Interpreter: PowerShell\n\n## 検知・防御策\n\n**防御策**\n・Building Block RulesとHigher-Order Rulesを組み合わせて使用する。\n・Entity-Based Correlation、Cross–Data Source Visibility、Time and Prevalence Awarenessを活用する。\n\n**検知策**\n①検知ポイント: Elastic社のセキュリティツール\n②Sigma/KQL:\n```\nindex=security_events event.category=\"network\" AND event.type=\"connection_attempt\" AND source.ip!=\"127.0.0.1\"\n```",
+    "url": "https://www.elastic.co/security-labs/higher-order-detection-rules"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "POST_EXP",
+    "title": "Linux rootkitの静的検出限界",
+    "summary_points": [
+      "Linux rootkitの検出における静的検出の限界が報告された。",
+      "静的検出は単純なバイナリ修正でも信頼性が低下する。",
+      "Linux rootkitは高度な難読化手法をほとんど使用しない。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1070",
+      "T1027"
+    ],
+    "content": "## 概要\nLinux rootkitの検出における静的検出の限界が報告された。重要なのは、静的検出が単純なバイナリ修正でも信頼性が低下する点である。\n\n技術的要点:\n* 静的検出は、バイナリのシンボルテーブルやメタデータを削除すると、検出率が大幅に低下する。\n* 単一のヌルバイトを追加するだけでも、多くの検出エンジンで検出率が低下する。\n* Linux rootkitは、高度な難読化手法をほとんど使用せず、単純なXORエンコードや軽量なパッキング手法で静的署名を回避できる。\n\n**新規性・差異化ポイント:** \n従来の静的検出の限界を再び強調し、Linux rootkitの検出における行動検出の重要性を訴えている点。\n\n属性情報:\nAPT: 記載なし\nMalware: Linux rootkit\nCVE: 記載なし\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n静的検出は、バイナリのハッシュ値やシンボルテーブルなどのメタデータに依存している。しかし、これらのメタデータは容易に削除や修正が可能であり、攻撃者にとっては容易に回避できる。\n\nLinux rootkitは、静的検出を回避するために、単純なXORエンコードや軽量なパッキング手法を使用している。これらの手法は、実装が容易であり、静的署名を効果的に回避できる。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n* Linuxベースのシステム\n* rootkitバイナリ（実験用に使用）\n* VirusTotalアカウント（オプション）\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: rootkitバイナリを入手し、VirusTotalにアップロードする。\n【目的】: 静的検出の限界を検証する。\n【結果】: 静的検出エンジンの検出率を確認する。\n\n【フェーズ2: 実験】\n【操作】: rootkitバイナリをストリップし、単一のヌルバイトを追加する。\n【目的】: 静的検出の信頼性を確認する。\n【結果】: 検出率の低下を確認する。\n\n## IoC・痕跡情報\n* ハッシュ値: 記載なし\n* C2ドメイン・IP: 記載なし\n* 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n* T1070: Indicator Removal\n* T1027: Obfuscated Files or Information\n\n## 検知・防御策\n\n**防御策**\n・行動検出を実装する。\n・システムの整合性を定期的にチェックする。\n・ネットワークトラフィックを監視する。\n\n**検知策**\n①検知ポイント: EDRのプロセス生成ログ、システムコールログ。\n②Sigma/KQL:\n```\nprocess_creation\n| where process_name == \"rootkit\"\n| where command_line == \"*--strip-all*\"\n```",
+    "url": "https://www.elastic.co/security-labs/linux-rootkits-2-caught-in-the-act"
+  },
+  {
+    "date": "2026-04-07",
+    "category": "AI_SEC",
+    "title": "Mutation Testingを用いた攻撃手法",
+    "summary_points": [
+      "Mutation testingを用いた新たな攻撃手法が報告された。",
+      "コードカバレッジの限界を突くことで、ソフトウェアのテスト不備を悪用する。",
+      "MuTONとmewtが開発された。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1566.001"
+    ],
+    "content": "## 概要\n\nMutation testingを用いた新たな攻撃手法が報告された。重要なのは、コードカバレッジの限界を突くことで、ソフトウェアのテスト不備を悪用する点である。\n\n技術的要点:\n\n* Mutation testingツールであるMuTONとmewtが開発された。\n* これらのツールは、コードのテスト不備を突くことで、ソフトウェアの脆弱性を悪用する。\n* 従来のコードカバレッジでは検出できない脆弱性を検出可能である。\n\n**🆕 新規性・差異化ポイント:** \n従来のコードカバレッジでは検出できない脆弱性を検出するために、mutation testingを用いた新たな攻撃手法である。\n\n属性情報（判明分のみ、不明は「記載なし」）:\nAPT: 記載なし\nMalware: 記載なし\nCVE: 記載なし\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nMutation testingは、コードに意図的にバグを導入し、そのバグがテストによって検出されるかどうかをチェックする技術である。これにより、コードのテスト不備を検出することができる。\n\nMuTONとmewtは、TON blockchain言語（FunC, Tolk, Tact）やSolidity, Rust, Goなどの言語をサポートするmutation testingツールである。これらのツールは、コードのテスト不備を突くことで、ソフトウェアの脆弱性を悪用する。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n\n* 必要なOS: 記載なし\n* 必要なツール・サービス: MuTONとmewt\n* 攻撃対象の前提状態: 記載なし\n\n### 攻撃フロー\n\n#### フェーズ1: 準備\n\n【操作】: MuTONとmewtをセットアップする。\n【目的】: コードのテスト不備を検出するため。\n【結果】: コードのテスト不備を検出可能になる。\n\n#### フェーズ2: 実行\n\n【操作】: MuTONとmewtを使用して、コードに意図的にバグを導入する。\n【目的】: コードのテスト不備を悪用するため。\n【結果】: コードのテスト不備を悪用可能になる。\n\n## IoC・痕跡情報\n\n* ハッシュ値: 記載なし\n* C2ドメイン・IP: 記載なし\n* 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n\n* T1566.001: コードカバレッジの限界を突くことで、ソフトウェアのテスト不備を悪用する。\n\n## 検知・防御策\n\n**防御策**\n\n* コードレビューを徹底する。\n* テストを十分に行う。\n* コードカバレッジだけでなく、mutation testingも活用する。\n\n**検知策**\n\n①検知ポイント: ログ取得元を列挙\n　（例: EDRのプロセス生成ログ、Windowsイベントログ4688、NDRのDNSクエリログ）\n②Sigma/KQL:\n```\nプロセス名: MuTON\nコマンドライン: --mutation-testing\n```",
+    "url": "https://blog.trailofbits.com/2026/04/01/mutation-testing-for-the-agentic-era/"
+  },
+  {
     "date": "2026-04-06",
     "category": "MALWARE",
     "title": "TeamPCPのサプライチェーンキャンペーンが欧州委員会のクラウド環境に影響",
