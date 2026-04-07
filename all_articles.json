@@ -1,5 +1,42 @@
 [
   {
+    "date": "2026-04-08",
+    "category": "POST_EXP",
+    "title": "axios npmパッケージのサプライチェーンコンポマイズ",
+    "summary_points": [
+      "axios npmパッケージのメンテナアカウントがコンポマイズされ、悪意のあるバージョンが公開された。",
+      "悪意のあるJavaScriptがプラットフォーム固有のステージ2インプラントを展開し、RATがmacOS、Windows、Linuxに感染した。",
+      "インプラントは同一のC2プロトコルとコマンドセットを使用し、プラットフォームネイティブの実装であった。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1195.001",
+      "T1204.001",
+      "T1081"
+    ],
+    "content": "## 概要\n\naxios npmパッケージのサプライチェーンコンポマイズが報告された。重要なのは、悪意のあるバージョンが公開され、macOS、Windows、LinuxにRATが感染した点である。\n\n技術的要点:\n- 悪意のあるJavaScriptがプラットフォーム固有のステージ2インプラントを展開した\n- インプラントは同一のC2プロトコルとコマンドセットを使用した\n- プラットフォームネイティブの実装であった\n\n**🆕 新規性・差異化ポイント:**\n従来のRATとは異なり、プラットフォーム固有の実装であった点が特徴である。\n\n属性情報（判明分のみ、不明は「記載なし」）:\nAPT: 記載なし\nMalware: RAT\nCVE: 記載なし\nIoC: sfrclak[.]com:8000\n\n## 脆弱性・脅威の技術的メカニズム\n\n攻撃者は、axios npmパッケージのメンテナアカウントをコンポマイズし、悪意のあるバージョンを公開した。悪意のあるJavaScriptは、プラットフォーム固有のステージ2インプラントを展開し、RATをmacOS、Windows、Linuxに感染させた。インプラントは同一のC2プロトコルとコマンドセットを使用し、プラットフォームネイティブの実装であった。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 必要なOS: macOS、Windows、Linux\n- 必要なツール: npm、axios\n- 攻撃対象の前提状態: axios npmパッケージのメンテナアカウントがコンポマイズされている\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: axios npmパッケージのメンテナアカウントをコンポマイズする\n【目的】: 悪意のあるバージョンを公開するため\n【結果】: 悪意のあるバージョンが公開される\n\n【フェーズ2: 実行】\n【操作】: 悪意のあるJavaScriptがプラットフォーム固有のステージ2インプラントを展開する\n【目的】: RATをmacOS、Windows、Linuxに感染させるため\n【結果】: RATが感染する\n\n■ 具体的な実装・設定の詳細\n- 悪意のあるJavaScriptは、プラットフォーム固有のステージ2インプラントを展開する\n- インプラントは同一のC2プロトコルとコマンドセットを使用する\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: sfrclak[.]com:8000\n- 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n- T1195.001: Supply Chain Compromise\n- T1204.001: User Data\n- T1081: Credentials in Files\n\n## 検知・防御策\n\n**防御策**\n・npmパッケージの検証を強化する\n・悪意のあるバージョンのaxios npmパッケージを削除する\n・プラットフォーム固有のインプラントを検出する\n\n**検知策**\n①検知ポイント: EDRのプロセス生成ログ、Windowsイベントログ4688、NDRのDNSクエリログ\n②Sigma/KQL:\n```\ntitle:axios npmパッケージのサプライチェーンコンポマイズ\n```",
+    "url": "https://www.elastic.co/security-labs/axios-one-rat-to-rule-them-all"
+  },
+  {
+    "date": "2026-04-08",
+    "category": "AI_SEC",
+    "title": "Claude Mythos Previewのサイバーセキュリティ研究能力",
+    "summary_points": [
+      "AnthropicがClaude Mythos Previewを限られたパートナーに提供し始めた。",
+      "このモデルは、サイバーセキュリティ研究能力が向上しており、一般的な脆弱性検出やブラックボックステスト、エンドポイントのセキュリティ確保、システムのペネトレーションテストなどのタスクに使用される予定であ",
+      "Claude Mythos Previewは、数千のハイスペクトル脆弱性を発見した。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1203",
+      "T1210"
+    ],
+    "content": "## 概要\n\nAnthropicがClaude Mythos Previewを限られたパートナーに提供し始めた。このモデルは、サイバーセキュリティ研究能力が向上しており、一般的な脆弱性検出やブラックボックステスト、エンドポイントのセキュリティ確保、システムのペネトレーションテストなどのタスクに使用される予定である。\n\n技術的要点:\n\n* Claude Mythos Previewは、数千のハイスペクトル脆弱性を発見した。\n* このモデルは、JIT heap sprayを作成し、rendererとOSのサンドボックスをエスケープすることができる。\n* 自律的にローカル特権昇格エクスプロイトをLinuxや他のオペレーティングシステムで作成することができる。\n* リモートコード実行エクスプロイトをFreeBSDのNFSサーバーで作成し、完全なrootアクセスを認証されていないユーザーに提供することができる。\n\n**🆕 新規性・差異化ポイント:** \nClaude Mythos Previewのサイバーセキュリティ研究能力は、従来のモデルであるClaude Opus 4.6と比較して大幅に向上している。\n\n属性情報:\nAPT: 記載なし\nMalware: 記載なし\nCVE: 記載なし\nIoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\n\nClaude Mythos Previewは、一般的な脆弱性検出やブラックボックステスト、エンドポイントのセキュリティ確保、システムのペネトレーションテストなどのタスクに使用される。このモデルは、JIT heap sprayを作成し、rendererとOSのサンドボックスをエスケープすることができる。また、自律的にローカル特権昇格エクスプロイトをLinuxや他のオペレーティングシステムで作成することができる。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n\n* 必要なOS: 記載なし\n* 必要なツール・サービス: Claude Mythos Preview\n* 攻撃対象の前提状態: 記載なし\n\n### 攻撃フロー\n\n#### フェーズ1: 準備\n\n【操作】: Claude Mythos Previewを起動する。\n【目的】: モデルのサイバーセキュリティ研究能力を有効にする。\n【結果】: モデルが脆弱性検出を開始する。\n\n#### フェーズ2: 実行\n\n【操作】: モデルに脆弱性検出タスクを実行させる。n【目的】: 脆弱性を検出する。\n【結果】: モデルが脆弱性を検出し、エクスプロイトを作成する。\n\n## IoC・痕跡情報\n\n* 記載なし\n\n## MITRE ATT&CK マッピング\n\n* T1203: ユーザーデータ\n* T1210: エクスプロイト\n\n## 検知・防御策\n\n**防御策**\n\n* 脆弱性検出ツールを更新する。\n* セキュリティパッチを適用する。\n* ネットワークアクセス制御を実施する。\n\n**検知策**\n\n① 検知ポイント: \n* セキュリティログ\n* ネットワークトラフィックログ\n\n② Sigma/KQL:\n```\nindex=security_logs sourcetype=\" vulnerability_detection\" \n| stats count by vulnerability_id \n| where count > 1\n```",
+    "url": "https://simonwillison.net/2026/Apr/7/project-glasswing/#atom-everything"
+  },
+  {
     "date": "2026-04-07",
     "category": "MALWARE",
     "title": "TeamPCPキャンペーンの脅威インテリジェンスレポート",
