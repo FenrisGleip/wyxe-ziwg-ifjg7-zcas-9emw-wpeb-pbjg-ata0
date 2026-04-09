@@ -44,31 +44,31 @@ FALLBACK_MODEL = "llama-3.3-70b-versatile"  # llama-4-scout失敗時のフォー
 # ─────────────────────────────────────────────
 RSS_FEEDS = {
     "MALWARE": [
-        "https://blog.malwarebytes.com/feed/",                        # Malwarebytes Labs (stable)
+        "https://securelist.com/feed/",                               # Kaspersky Securelist (深い技術分析)
+        "https://unit42.paloaltonetworks.com/feed/",                  # Palo Alto Unit42 (APT/マルウェア)
+        "https://blog.malwarebytes.com/feed/",                        # Malwarebytes Labs
         "https://isc.sans.edu/rssfeed_full.xml",                      # SANS ISC Diary
-        "https://securelist.com/feed/",                               # Kaspersky Securelist
-        "https://www.darkreading.com/rss.xml",                        # Dark Reading
-        "https://www.trellix.com/en-us/about/newsroom/stories/research/rss.xml",  # Trellix Research
+        "https://www.welivesecurity.com/en/rss/feed/",                # ESET WeLiveSecurity
     ],
     "INITIAL": [
+        "https://securityaffairs.com/feed",                           # Security Affairs (PoC情報が早い)
         "https://feeds.feedburner.com/TheHackersNews",                # The Hacker News
-        "https://seclists.org/rss/fulldisclosure.rss",                # Full Disclosure
-        "https://www.zerodayinitiative.com/rss/published/",           # ZDI Published Advisories
-        "https://portswigger.net/daily-swig/rss",                     # Daily Swig (PortSwigger)
-        "https://www.cisa.gov/cybersecurity-advisories/all.xml",      # CISA Advisories
+        "https://www.cisa.gov/cybersecurity-advisories/all.xml",      # CISA KEV
+        "https://www.zerodayinitiative.com/rss/published/",           # ZDI Public Advisories
+        "https://seclists.org/rss/fulldisclosure.rss",                # Full Disclosure ML
     ],
     "POST_EXP": [
+        "https://www.cyderes.com/howler-cell/feed/",                  # Cyderes Howler Cell (BlueHammer等)
         "https://research.checkpoint.com/feed/",                      # Check Point Research
         "https://www.elastic.co/security-labs/rss/feed.xml",         # Elastic Security Labs
-        "https://securelist.com/feed/",                               # Kaspersky Securelist
-        "https://www.cyderes.com/blog/feed/",                         # Cyderes (post-exp focus)
-        "https://posts.specterops.io/feed",                           # SpecterOps (AD/post-exp specialist)
+        "https://www.redpacketsecurity.com/feed/",                    # RedPacket Security (技術分析)
+        "https://www.trustedsec.com/feed/",                           # TrustedSec
     ],
     "AI_SEC": [
         "https://blog.trailofbits.com/feed/",                         # Trail of Bits
-        "https://simonwillison.net/atom/everything/",                 # Simon Willison (LLM sec)
-        "https://feeds.feedburner.com/TheHackersNews",                # The Hacker News (AI coverage)
-        "https://www.microsoft.com/en-us/security/blog/feed/",        # Microsoft Security (AI threats)
+        "https://simonwillison.net/atom/everything/",                 # Simon Willison
+        "https://feeds.feedburner.com/TheHackersNews",                # The Hacker News AI coverage
+        "https://www.microsoft.com/en-us/security/blog/feed/",        # Microsoft Security
         "https://research.checkpoint.com/feed/",                      # Check Point AI threat research
     ],
 }
@@ -133,10 +133,15 @@ def build_prompt(content: str, category: str) -> str:
 - テスターがラボで試せる具体的な手順・ツール・設定が推測できるか
 - 単なるインシデント報告や製品紹介ではなく、攻撃手法の技術詳細があるか
 
-スコア1〜3の場合のみ、以下のJSONを出力してください:
+スコア1〜2の場合のみ、以下のJSONを出力してください:
 {{"skip": true, "reason": "除外理由を日本語で記載"}}
 
-スコア4〜5の場合: 以下のSTEP 2に進んでください。
+スコア3〜5の場合: 以下のSTEP 2に進んでください。
+
+【重要例外】以下の要素があればスコア2でも採用し STEP 2 に進んでください:
+- 未パッチ・ゼロデイ（no CVE / no patch）のPoC公開
+- 新しいCVEに対する機能するExploit/PoCが公開された
+- 実際の攻撃（ITW: in-the-wild）への悪用が確認された
 
 ━━━ STEP 2: レポート作成 ━━━
 
@@ -306,7 +311,10 @@ def validate_result(res: dict) -> bool:
 # ─────────────────────────────────────────────
 # LLM呼び出し（モデルフォールバック付きリトライ）
 # ─────────────────────────────────────────────
+_tpd_hit_models: set = set()  # TPD上限に達したモデルを記録
+
 def call_llm(prompt: str) -> dict | None:
+    global _tpd_hit_models
     import re as _re
     _RATE_LIMIT_PAT = _re.compile(r"try again in ([\d.]+)([smh])")
 
@@ -331,7 +339,7 @@ def call_llm(prompt: str) -> dict | None:
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=2048,
+                    max_tokens=3000,
                 )
                 raw = resp.choices[0].message.content
                 result = extract_json(raw)
@@ -356,17 +364,35 @@ def call_llm(prompt: str) -> dict | None:
                     model_dead = True
                     break
                 elif _RATE_LIMIT in err:
-                    wait = min(_parse_wait(err), 60)  # 最大60秒待つ
-                    print(f"    ✗ [{model}] rate limit — {wait:.0f}秒待機...")
-                    time.sleep(wait)
-                    # rate limitはTPD上限の可能性が高いので次モデルへ
-                    model_dead = True
-                    break
+                    err_lower = err.lower()
+                    # TPD（日次）上限 → 待機しても無意味、次モデルへ
+                    if "tokens per day" in err_lower or "tpd" in err_lower:
+                        print(f"    ✗ [{model}] TPD上限 — 次モデルへ")
+                        model_dead = True
+                        _tpd_hit_models.add(model)
+                        break
+                    # TPM（分次）上限 → 指定時間だけ待機してリトライ
+                    else:
+                        wait = min(_parse_wait(err), 30)  # TPM上限は最大30秒
+                        print(f"    ✗ [{model}] TPM上限 — {wait:.0f}秒待機...")
+                        time.sleep(wait)
                 else:
                     print(f"    ✗ [{model}] attempt {attempt+1} — {e}")
                     time.sleep(3)
 
     return None
+
+# ─────────────────────────────────────────────
+# TPD上限検知用センチネル値
+TPD_EXHAUSTED = object()
+
+def call_llm_safe(prompt: str):
+    """call_llm のラッパー。両モデルがTPD上限なら TPD_EXHAUSTED を返す"""
+    result = call_llm(prompt)
+    if result is None:
+        # _tpd_exhaustedフラグを確認（call_llm内でセットされる）
+        pass
+    return result
 
 # ─────────────────────────────────────────────
 # 重複チェック（URLとタイトル類似度）
@@ -384,7 +410,7 @@ def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
     try:
         req = urllib.request.Request(
             feed_url,
-            headers={"User-Agent": "Mozilla/5.0 (RedTeam Intel Agent/3.2)"}
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "application/rss+xml, application/xml, text/xml, */*"}
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read()
@@ -444,7 +470,7 @@ def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
                     continue
                 summary = entry.findtext("atom:summary", "", ns) or entry.findtext("atom:content", "", ns)
                 body = unescape(re.sub(r"<[^>]+>", " ", summary or "")).strip()
-                if url and len(body) >= 300:
+                if url and len(body) >= 150:
                     items.append({"url": url, "title": title, "content": body})
                 if len(items) >= max_items:
                     break
@@ -460,7 +486,7 @@ def fetch_article_body(url: str) -> str:
     """記事URLから本文をフェッチして返す（RSSの要約が短い場合の補完）"""
     try:
         req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 (RedTeam Intel Agent/3.2)"}
+            url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
@@ -500,6 +526,8 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
             print(f"  RSS: {feed_url[:60]}")
             items = fetch_rss(feed_url, MAX_ITEMS_PER_FEED)
             print(f"    取得: {len(items)} 件")
+            if not items:
+                cat_stats["feed_errors"].append(feed_url.split("/")[2])
 
             for item in items:
                 if cat_count >= MAX_PER_CATEGORY:
@@ -511,6 +539,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                 # 重複URL
                 if url in seen_urls:
                     print(f"    skip (重複URL): {url[:55]}")
+                    cat_stats["skipped_dup"] += 1
                     continue
                 seen_urls.add(url)
 
@@ -522,8 +551,9 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                         content = fetched
 
                 # それでも短ければスキップ
-                if len(content) < 400:
+                if len(content) < 200:
                     print(f"    skip (本文不足): {url[:55]}")
+                    cat_stats["skipped_low"] += 1
                     continue
 
                 print(f"  → {url[:70]}")
@@ -531,7 +561,16 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                 prompt = build_prompt(content, cat_id)
                 result = call_llm(prompt)
 
+                # 両モデルともTPD上限に達したら残りのカテゴリをスキップ
+                if len(_tpd_hit_models) >= 2:
+                    tpd_exhausted = True
+                    run_stats["tpd_exhausted"] = True
+                    cat_stats["tpd_hit"] = True
+                    print("  !! 両モデルTPD上限 — 残りの処理をスキップ")
+                    break
+
                 if result is None:
+                    cat_stats["skipped_low"] += 1
                     continue
 
                 # タイトル重複チェック
@@ -553,6 +592,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                     "url":            url,
                 })
                 cat_count += 1
+                cat_stats["adopted"] += 1
                 time.sleep(SLEEP_BETWEEN_REQ)
 
         print(f"  [{cat_id}] {cat_count} 件採用")
@@ -560,7 +600,7 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
     print(f"\n{'='*50}")
     print(f"  完了: 合計 {len(new_articles)} 件")
     print(f"{'='*50}")
-    return new_articles
+    return new_articles, run_stats
 
 # ─────────────────────────────────────────────
 # DB更新
@@ -607,11 +647,14 @@ def load_run_log() -> list[dict]:
             pass
     return []
 
-def append_run_log(run_log: list[dict], new_articles_count: int, total_count: int) -> list[dict]:
+def append_run_log(run_log: list[dict], new_articles_count: int, total_count: int, stats: dict = None) -> list[dict]:
     entry = {
-        "datetime_jst": now_jst().strftime("%Y-%m-%d %H:%M"),
-        "new_articles":  new_articles_count,
+        "datetime_jst":   now_jst().strftime("%Y-%m-%d %H:%M"),
+        "new_articles":   new_articles_count,
         "total_articles": total_count,
+        "tpd_exhausted":  stats.get("tpd_exhausted", False) if stats else False,
+        "categories":     stats.get("categories", {}) if stats else {},
+        "feed_errors":    stats.get("feed_errors", []) if stats else [],
     }
     run_log.append(entry)
     run_log = run_log[-90:]  # 直近90件のみ保持
@@ -1590,6 +1633,20 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   padding:1px 6px;border-radius:2px;margin-left:6px;
 }
 .badge-zero{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
+.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px;font-weight:700}
+.badge-today{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px;margin-left:4px}
+.stat-card-warn .stat-card-val{color:var(--MALWARE)!important}
+.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf);transition:.15s}
+.log-row:hover{background:var(--surf2)}
+.today-row{border-left:2px solid var(--acc)!important}
+.tpd-row{border-left:2px solid var(--MALWARE)!important;background:rgba(255,68,85,.02)!important}
+.log-row-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1;min-width:120px}
+.log-nb{font-family:var(--mono);font-size:.65rem}
+.log-total{font-family:var(--mono);font-size:.6rem;color:var(--muted);margin-left:auto}
+.log-row-cats{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+.cat-result{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.04em}
+.feed-err-list{font-family:var(--mono);font-size:.58rem;color:var(--MALWARE);margin-top:4px;opacity:.8}
 .no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
 @media(max-width:500px){
   .summary-row{grid-template-columns:1fr 1fr}
@@ -1614,25 +1671,57 @@ const log = (window.__RUN_LOG__ || []).slice().reverse();
 const today = new Date().toISOString().slice(0,10);
 const totalRuns = log.length;
 const totalNew  = log.reduce((s,r)=>s+(r.new_articles||0),0);
+const tpdCount  = log.filter(r=>r.tpd_exhausted).length;
 const lastRun   = log[0]?.datetime_jst || '—';
 document.getElementById('summary-row').innerHTML = `
   <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">TOTAL RUNS</div></div>
   <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES COLLECTED</div></div>
+  <div class="stat-card ${tpdCount>0?'stat-card-warn':''}"><span class="stat-card-val">${tpdCount}</span><div class="stat-card-lbl">TPD ERRORS</div></div>
   <div class="stat-card"><span class="stat-card-val" style="font-size:1rem;padding-top:4px">${lastRun}</span><div class="stat-card-lbl">LAST RUN (JST)</div></div>`;
+
+const CAT_LABELS = {MALWARE:'MAL',INITIAL:'INIT',POST_EXP:'POST',AI_SEC:'AI'};
+
 const wrap = document.getElementById('log-wrap');
 if(!log.length){
   wrap.innerHTML='<div class="no-log">// 実行ログがありません</div>';
 } else {
-  wrap.innerHTML = `<table class="log-table">
-    <thead><tr><th>実行日時 (JST)</th><th>新規取得</th><th>累計件数</th></tr></thead>
-    <tbody>${log.map(r=>{
-      const isToday=r.datetime_jst?.startsWith(today);
-      const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:`<span class="badge-zero">±0</span>`;
-      return `<tr class="${isToday?'today-row':''}">
-        <td>${r.datetime_jst}${isToday?'<span class="badge-new" style="margin-left:6px">TODAY</span>':''}</td>
-        <td>${nb}</td><td>${r.total_articles??'—'}</td></tr>`;
-    }).join('')}</tbody>
-  </table>`;
+  wrap.innerHTML = log.map(r=>{
+    const isToday = r.datetime_jst?.startsWith(today);
+    const tpdBadge = r.tpd_exhausted ? '<span class="badge-tpd">TPD上限</span>' : '';
+    const nb = r.new_articles>0
+      ? `<span class="badge-new">+${r.new_articles}</span>`
+      : `<span class="badge-zero">±0</span>`;
+
+    // カテゴリ別サマリー
+    const cats = r.categories || {};
+    const catHtml = Object.entries(CAT_LABELS).map(([id,lbl])=>{
+      const c = cats[id];
+      if(!c) return '';
+      const adopted = c.adopted || 0;
+      const tpd = c.tpd_hit;
+      const ferr = (c.feed_errors||[]).length;
+      const color = tpd ? 'var(--MALWARE)' : adopted > 0 ? 'var(--acc)' : 'var(--muted)';
+      const icon = tpd ? '⚠' : adopted > 0 ? '✓' : ferr > 0 ? '✗' : '—';
+      const title = tpd ? 'TPD上限' : ferr > 0 ? `フィードエラー ${ferr}件` : `採用 ${adopted}件`;
+      return `<span class="cat-result" style="color:${color}" title="${title}">${lbl}:${icon}${adopted>0?adopted:''}</span>`;
+    }).join('');
+
+    // フィードエラー一覧
+    const allFeedErrs = Object.values(cats).flatMap(c=>c.feed_errors||[]);
+    const feedErrHtml = allFeedErrs.length
+      ? `<div class="feed-err-list">Feed error: ${[...new Set(allFeedErrs)].join(', ')}</div>` : '';
+
+    return `<div class="log-row ${isToday?'today-row':''} ${r.tpd_exhausted?'tpd-row':''}">
+      <div class="log-row-main">
+        <span class="log-dt">${r.datetime_jst}${isToday?' <span class="badge-today">TODAY</span>':''}</span>
+        <span class="log-nb">${nb}</span>
+        ${tpdBadge}
+        <span class="log-total">${r.total_articles??'—'} total</span>
+      </div>
+      <div class="log-row-cats">${catHtml}</div>
+      ${feedErrHtml}
+    </div>`;
+  }).join('');
 }
 </script>
 </body>
@@ -1643,8 +1732,8 @@ if(!log.length){
 if __name__ == "__main__":
     db = load_db()
     existing_urls = {a["url"] for a in db}
-    new_data = fetch_and_analyze(existing_urls)
+    new_data, run_stats = fetch_and_analyze(existing_urls)
     db = update_db(db, new_data)
     run_log = load_run_log()
-    run_log = append_run_log(run_log, len(new_data), len(db))
+    run_log = append_run_log(run_log, len(new_data), len(db), run_stats)
     generate_html(db, run_log)
