@@ -10,6 +10,11 @@ import xml.etree.ElementTree as ET
 from html import unescape
 from groq import Groq
 from datetime import datetime, timezone, timedelta
+try:
+    from tavily import TavilyClient
+    _TAVILY_AVAILABLE = True
+except ImportError:
+    _TAVILY_AVAILABLE = False
 
 JST = timezone(timedelta(hours=9))
 def now_jst():
@@ -22,6 +27,9 @@ GROQ_KEY    = os.getenv("GROQ_API_KEY")
 if not GROQ_KEY:
     raise RuntimeError("GROQ_API_KEY が未設定です。GitHub Secrets を確認してください。")
 groq_client = Groq(api_key=GROQ_KEY)
+
+TAVILY_KEY  = os.getenv("TAVILY_API_KEY")
+tavily_client = TavilyClient(api_key=TAVILY_KEY) if (_TAVILY_AVAILABLE and TAVILY_KEY) else None
 
 MASTER_DATA      = "all_articles.json"
 OUTPUT_HTML      = "index.html"
@@ -72,6 +80,29 @@ RSS_FEEDS = {
         "https://research.checkpoint.com/feed/",                      # Check Point AI threat research
     ],
 }
+
+
+# ─────────────────────────────────────────────
+# Tavily検索クエリ（カテゴリ別・トレンド捕捉用）
+# RSSで拾えないゼロデイ・PoC・話題のエクスプロイトを対象
+# 月1000cr無料枠: 4クエリ/日 = 120cr/月で余裕あり
+# ─────────────────────────────────────────────
+TAVILY_QUERIES = {
+    "MALWARE": [
+        "new malware technical analysis loader shellcode EDR bypass 2026",
+    ],
+    "INITIAL": [
+        "zero-day PoC exploit published unpatched Windows Linux 2026",
+        "CVE 2026 proof of concept GitHub exploit released",
+    ],
+    "POST_EXP": [
+        "new privilege escalation technique Windows Active Directory 2026",
+    ],
+    "AI_SEC": [
+        "LLM AI agent attack jailbreak prompt injection new technique 2026",
+    ],
+}
+TAVILY_MAX_RESULTS = 3   # 1クエリあたりの最大件数
 
 MAX_ITEMS_PER_FEED = 5   # 1フィードあたり最新N件をチェック
 MAX_PER_CATEGORY  = 10  # カテゴリ上限（新規性フィルタで絞られる）
@@ -502,8 +533,35 @@ def fetch_article_body(url: str) -> str:
         return ""
 
 
+
 # ─────────────────────────────────────────────
-# 情報収集メイン（RSS版）
+# Tavily検索（トレンド記事の捕捉）
+# ─────────────────────────────────────────────
+def fetch_tavily(query: str, max_results: int = 3) -> list[dict]:
+    """Tavilyでウェブ検索し、記事リストを返す"""
+    if not tavily_client:
+        return []
+    try:
+        results = tavily_client.search(
+            query=query,
+            search_depth="advanced",   # 本文全体を取得
+            max_results=max_results,
+            days=3,                    # 直近3日の記事のみ
+        )["results"]
+        items = []
+        for r in results:
+            url     = r.get("url", "")
+            content = r.get("content", "")
+            title   = r.get("title", "")
+            if url and len(content) >= 200:
+                items.append({"url": url, "title": title, "content": content})
+        return items
+    except Exception as e:
+        print(f"  ✗ Tavily検索エラー ({query[:40]}): {e}")
+        return []
+
+# ─────────────────────────────────────────────
+# 情報収集メイン（RSS + Tavily併用）
 # ─────────────────────────────────────────────
 def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
     print("=" * 50)
@@ -612,6 +670,64 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                 time.sleep(SLEEP_BETWEEN_REQ)
 
         print(f"  [{cat_id}] {cat_count} 件採用")
+
+    # ──────────────────────────────────────
+    # Tavily検索フェーズ（RSSの補完）
+    # ──────────────────────────────────────
+    if tavily_client and not tpd_exhausted:
+        print("\n[TAVILY] ───────────────────────")
+        for cat_id, queries in TAVILY_QUERIES.items():
+            cat_stats = run_stats["categories"].setdefault(cat_id, {
+                "adopted": 0, "skipped_dup": 0, "skipped_low": 0,
+                "tpd_hit": False, "feed_errors": []
+            })
+            for query in queries:
+                if tpd_exhausted:
+                    break
+                print(f"  検索: {query[:60]}")
+                items = fetch_tavily(query, TAVILY_MAX_RESULTS)
+                print(f"    取得: {len(items)} 件")
+                for item in items:
+                    url     = item["url"]
+                    content = item["content"]
+                    if url in seen_urls:
+                        print(f"    skip (重複URL): {url[:55]}")
+                        cat_stats["skipped_dup"] += 1
+                        continue
+                    seen_urls.add(url)
+                    print(f"  → {url[:70]}")
+                    prompt = build_prompt(content, cat_id)
+                    result = call_llm(prompt)
+                    if len(_tpd_hit_models) >= 2:
+                        tpd_exhausted = True
+                        run_stats["tpd_exhausted"] = True
+                        cat_stats["tpd_hit"] = True
+                        print("  !! 両モデルTPD上限 — Tavilyもスキップ")
+                        break
+                    if result is None:
+                        cat_stats["skipped_low"] += 1
+                        continue
+                    th = title_hash(result["title"])
+                    if th in seen_title_hashes:
+                        print(f"    ✗ タイトル重複: {result['title'][:40]}")
+                        continue
+                    seen_title_hashes.add(th)
+                    new_articles.append({
+                        "date":           now_jst().strftime("%Y-%m-%d"),
+                        "category":       cat_id,
+                        "title":          result["title"],
+                        "summary_points": result.get("summary_points", []),
+                        "poc_url":        result.get("poc_url", ""),
+                        "cvss_score":     result.get("cvss_score", ""),
+                        "mitre_ids":      result.get("mitre_ids", []),
+                        "content":        result["report"],
+                        "url":            url,
+                    })
+                    cat_stats["adopted"] += 1
+                    time.sleep(SLEEP_BETWEEN_REQ)
+    else:
+        if not tavily_client:
+            print("\n[TAVILY] スキップ（APIキー未設定）")
 
     print(f"\n{'='*50}")
     print(f"  完了: 合計 {len(new_articles)} 件")
