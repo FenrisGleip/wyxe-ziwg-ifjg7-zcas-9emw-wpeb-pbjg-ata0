@@ -338,5 +338,49 @@
       }
     },
     "feed_errors": []
+  },
+  {
+    "datetime_jst": "2026-04-10 16:07",
+    "new_articles": 1,
+    "total_articles": 55,
+    "researched_count": 0,
+    "tpd_exhausted": true,
+    "categories": {
+      "MALWARE": {
+        "adopted": 1,
+        "skipped_dup": 0,
+        "skipped_low": 21,
+        "researched": 0,
+        "tpd_hit": false,
+        "feed_errors": []
+      },
+      "INITIAL": {
+        "adopted": 0,
+        "skipped_dup": 2,
+        "skipped_low": 2,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": [
+          "seclists.org"
+        ]
+      },
+      "POST_EXP": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "AI_SEC": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      }
+    },
+    "feed_errors": []
   }
 ]

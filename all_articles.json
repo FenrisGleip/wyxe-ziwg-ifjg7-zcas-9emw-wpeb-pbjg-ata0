@@ -54,6 +54,30 @@
     "url": "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog"
   },
   {
+    "date": "2026-04-10",
+    "category": "MALWARE",
+    "title": "JavaScript経由のFormbookマルウェア展開",
+    "summary_points": [
+      "JavaScriptファイルがRARアーカイブ経由で配布され、ActiveXObjectを利用してローカルにコピーし、タスクスケジューラで永続化を図る。",
+      "PowerShellスクリプトがAES暗号化されたペイロード（Xrio.png）を復号し、EDR回避技術（ETWパッチ、AMSIバイパス）を適用する。",
+      "別のAES暗号化されたペイロード（Orio.png）から.NET DLLを抽出し、MSBuild.exeプロセスにインジェクトする。",
+      "インジェクトされたDLLは、Brio.pngから最終的なFormbookマルウェアペイロードを抽出し、実行する。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1059.005",
+      "T1059.001",
+      "T1547.001",
+      "T1027",
+      "T1140"
+    ],
+    "cve_ids": [],
+    "content": "## 概要\n本レポートは、RARアーカイブに含まれるJavaScriptファイル（cbmjlzan.JS）を起点としたFormbookマルウェアの攻撃チェーンを解説する。この攻撃は、ActiveXObjectを用いたローカルファイル操作と永続化、AES暗号化されたペイロードの復号、EDR回避技術の適用、プロセスインジェクション、そして最終的なマルウェア実行という多段階の技術を組み合わせている。\n\n技術的要点:\n*   **JavaScriptによる初期アクセスと永続化:** ActiveXObjectを利用し、ローカルファイル操作とタスクスケジューラによる永続化を実装する。\n*   **PowerShellによるペイロード復号とEDR回避:** AES暗号化されたデータを復号し、ETWパッチやAMSIバイパスといった高度なEDR回避技術を適用する。\n*   **プロセスインジェクションによる隠蔽:** 抽出した.NET DLLを正規プロセス（MSBuild.exe）にインジェクトし、検出を回避する。\n*   **Formbookマルウェアの展開:** インジェクトされたDLLが最終的なFormbookマルウェアペイロードをロードし、攻撃の目的を達成する。\n\n**🆕 新規性・差異化ポイント:** この攻撃チェーンは、単一のJavaScriptファイルから始まり、複数の暗号化レイヤーとプロセスインジェクションを組み合わせることで、初期の検出を回避し、最終的なマルウェアペイロードを効果的に展開する点で特徴的である。特に、PowerShellスクリプトによるEDR回避技術の適用と、.NET DLLを正規プロセスにインジェクトする手法は、現代の高度な攻撃手法を示唆している。\n\n属性: APT / Malware / CVE: 記載なし / IoC: 記載なし",
+    "url": "https://isc.sans.edu/diary/rss/32884",
+    "researched": false
+  },
+  {
     "date": "2026-04-09",
     "category": "INITIAL",
     "title": "Microsoft Visual Studio Code mcp.jsonコマンドインジェクションによるリモートコード実行",
