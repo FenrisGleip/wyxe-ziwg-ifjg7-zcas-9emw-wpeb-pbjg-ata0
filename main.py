@@ -50,21 +50,36 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if _GEMINI_AVAILABLE and GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
     gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+    print("[INIT] ✓ Gemini 2.5 Flash 利用可能")
 else:
     gemini_model = None
+    if not _GEMINI_AVAILABLE:
+        print("[INIT] ⚠ google-generativeai が未インストール — workflow.yml で pip install を確認")
+    elif not GEMINI_KEY:
+        print("[INIT] ⚠ GEMINI_API_KEY が未設定 — GitHub Secrets を確認")
+    print("[INIT] ⚠ Geminiが使えないためGroqのみで実行します(TPD枯渇リスク大)")
+
+if tavily_client:
+    print("[INIT] ✓ Tavily 利用可能")
+else:
+    if not _TAVILY_AVAILABLE:
+        print("[INIT] ⚠ tavily-python が未インストール")
+    elif not TAVILY_KEY:
+        print("[INIT] ⚠ TAVILY_API_KEY が未設定")
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # あれば検索レートが上がる(任意)
 
 MASTER_DATA     = "all_articles.json"
 OUTPUT_HTML     = "index.html"
 MAX_DB_ENTRIES  = 200
-MIN_REPORT_LEN  = 800   # 緩和 (1200 → 800): 補完前提で品質を別レイヤで担保
-MIN_SOURCE_LEN  = 400   # この文字数未満なら調査フェーズに強制投入
-MAX_RETRIES     = 3
+MIN_REPORT_LEN  = 600   # さらに緩和: Gemini主体なら品質は担保されるが、短い速報も許容
+MIN_SOURCE_LEN  = 400
+MAX_RETRIES     = 1     # 3 → 1: 品質不足時のリトライは TPD を無駄食いするので廃止
 SLEEP_BETWEEN_REQ = 1.5
 
-PRIMARY_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "llama-3.3-70b-versatile"
+# Gemini をレポート生成の主役に。Groq はスクリーニング専用 (軽量・高速)
+PRIMARY_MODEL  = "llama-3.3-70b-versatile"  # 安定モデルに切替
+FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
               "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -383,7 +398,8 @@ def call_gemini(prompt: str) -> dict | None:
 
 _tpd_hit_models: set = set()
 
-def call_llm(prompt: str) -> dict | None:
+def call_llm_report(prompt: str) -> dict | None:
+    """Groq フォールバックレポート生成 (Gemini未設定時のみ)"""
     global _tpd_hit_models
     _RATE_LIMIT_PAT = re.compile(r"try again in ([\d.]+)([smh])")
 
@@ -395,46 +411,36 @@ def call_llm(prompt: str) -> dict | None:
         return val * {"s": 1, "m": 60, "h": 3600}.get(unit, 1)
 
     for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
-        model_dead = False
-        for attempt in range(MAX_RETRIES):
-            if model_dead:
-                break
-            try:
-                resp = groq_client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                    max_tokens=3500,
-                )
-                raw = resp.choices[0].message.content
-                result = extract_json(raw)
-                if result and result.get("skip"):
-                    print(f"    ✗ [{model}] 新規性なし — {result.get('reason','')}")
-                    return None
-                if result and validate_result(result):
-                    print(f"    ✓ [{model}] attempt {attempt+1} — OK")
-                    return result
-                print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足")
-                time.sleep(2)
-            except Exception as e:
-                err = str(e)
-                if "decommissioned" in err:
-                    print(f"    ✗ [{model}] decommissioned")
-                    model_dead = True
-                    break
-                elif "rate_limit_exceeded" in err:
-                    if "tokens per day" in err.lower() or "tpd" in err.lower():
-                        print(f"    ✗ [{model}] TPD 上限")
-                        model_dead = True
-                        _tpd_hit_models.add(model)
-                        break
-                    else:
-                        wait = min(_parse_wait(err), 30)
-                        print(f"    ✗ [{model}] TPM — {wait:.0f}秒待機")
-                        time.sleep(wait)
+        if model in _tpd_hit_models:
+            continue
+        try:
+            resp = groq_client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=3500,
+            )
+            result = extract_json(resp.choices[0].message.content)
+            if result and result.get("skip"):
+                return None
+            if result and validate_result(result):
+                print(f"    ✓ [{model}] レポート生成完了")
+                return result
+            print(f"    ✗ [{model}] 品質不足 — 次モデルへ")
+        except Exception as e:
+            err = str(e)
+            if "decommissioned" in err:
+                print(f"    ✗ [{model}] decommissioned")
+            elif "rate_limit_exceeded" in err:
+                if "tokens per day" in err.lower() or "tpd" in err.lower():
+                    print(f"    ✗ [{model}] TPD 上限")
+                    _tpd_hit_models.add(model)
                 else:
-                    print(f"    ✗ [{model}] {e}")
-                    time.sleep(3)
+                    wait = min(_parse_wait(err), 30)
+                    print(f"    ✗ [{model}] TPM — {wait:.0f}秒待機")
+                    time.sleep(wait)
+            else:
+                print(f"    ✗ [{model}] {e}")
     return None
 
 
@@ -715,47 +721,64 @@ def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
 
 def fetch_article_body(url: str) -> str:
     """
-    改善版: <article>/<main> 優先抽出、なければ <p> タグを集約。
-    ナビゲーション・広告ノイズを軽減する。
+    改善版: <article>/<main>優先 → <div>内の<p>密度スコアリング → 全<p>集約
+    ナビゲーション・広告ノイズを軽減。
     """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
 
-        # script/style/nav/footer/aside を先に削除
-        raw = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-        raw = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-        raw = re.sub(r"<nav[^>]*>.*?</nav>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-        raw = re.sub(r"<footer[^>]*>.*?</footer>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-        raw = re.sub(r"<aside[^>]*>.*?</aside>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-        raw = re.sub(r"<header[^>]*>.*?</header>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        # script/style/nav/footer/aside/header を先に削除
+        for tag in ("script", "style", "nav", "footer", "aside", "header", "form"):
+            raw = re.sub(rf"<{tag}[^>]*>.*?</{tag}>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
         raw = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
 
-        # <article> または <main> タグ優先
-        article_match = re.search(r"<article[^>]*>(.*?)</article>", raw, re.DOTALL | re.IGNORECASE)
-        if article_match:
-            body = article_match.group(1)
-        else:
-            main_match = re.search(r"<main[^>]*>(.*?)</main>", raw, re.DOTALL | re.IGNORECASE)
-            if main_match:
-                body = main_match.group(1)
-            else:
-                # フォールバック: <p> タグを集約
-                paras = re.findall(r"<p[^>]*>(.*?)</p>", raw, re.DOTALL | re.IGNORECASE)
-                body = " ".join(paras) if paras else raw
-
         # <pre><code> は改行保持で抽出 (IoC/コマンド例)
-        codes = re.findall(r"<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>", body, re.DOTALL | re.IGNORECASE)
-        code_text = "\n".join(unescape(re.sub(r"<[^>]+>", "", c)) for c in codes)
+        codes = re.findall(r"<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>", raw, re.DOTALL | re.IGNORECASE)
+        code_text = "\n".join(unescape(re.sub(r"<[^>]+>", "", c)) for c in codes)[:2000]
 
-        body = re.sub(r"<[^>]+>", " ", body)
-        body = unescape(body)
-        body = re.sub(r"\s{2,}", " ", body).strip()
+        def _clean(s: str) -> str:
+            s = re.sub(r"<[^>]+>", " ", s)
+            s = unescape(s)
+            s = re.sub(r"\s{2,}", " ", s).strip()
+            return s
 
-        if code_text:
-            body = body + "\n\nCODE BLOCKS:\n" + code_text[:2000]
-        return body[:10000]
+        # 戦略1: <article> タグ
+        m = re.search(r"<article[^>]*>(.*?)</article>", raw, re.DOTALL | re.IGNORECASE)
+        if m:
+            body = _clean(m.group(1))
+            if len(body) >= 300:
+                return (body + ("\n\nCODE:\n" + code_text if code_text else ""))[:10000]
+
+        # 戦略2: <main> タグ
+        m = re.search(r"<main[^>]*>(.*?)</main>", raw, re.DOTALL | re.IGNORECASE)
+        if m:
+            body = _clean(m.group(1))
+            if len(body) >= 300:
+                return (body + ("\n\nCODE:\n" + code_text if code_text else ""))[:10000]
+
+        # 戦略3: class/id に "content|post|entry|article|body" を含む div を優先
+        candidates = re.findall(
+            r'<div[^>]*(?:class|id)\s*=\s*"[^"]*(?:content|post|entry|article|body|main)[^"]*"[^>]*>(.*?)</div>',
+            raw, re.DOTALL | re.IGNORECASE
+        )
+        if candidates:
+            best = max(candidates, key=lambda c: len(_clean(c)))
+            body = _clean(best)
+            if len(body) >= 300:
+                return (body + ("\n\nCODE:\n" + code_text if code_text else ""))[:10000]
+
+        # 戦略4: 全<p>タグを集約(ナビなどは上で削除済み)
+        paras = re.findall(r"<p[^>]*>(.*?)</p>", raw, re.DOTALL | re.IGNORECASE)
+        if paras:
+            body = _clean(" ".join(paras))
+            if len(body) >= 200:
+                return (body + ("\n\nCODE:\n" + code_text if code_text else ""))[:10000]
+
+        # 戦略5: 最終フォールバック — 全体を剥がす
+        body = _clean(raw)
+        return (body[:8000] + ("\n\nCODE:\n" + code_text if code_text else ""))[:10000]
     except Exception as e:
         print(f"  ✗ 本文取得失敗 ({url[:50]}): {e}")
         return ""
@@ -830,19 +853,19 @@ def process_article(url: str, title: str, content: str, category: str,
                 research_context += nvd_info
             time.sleep(0.5)
 
-    # 4. レポート生成 (Gemini 優先)
+    # 4. レポート生成 (Gemini 必須 — Groq は TPD 枯渇しやすいため使わない)
     if gemini_model:
         result = call_gemini(build_report_prompt(content, category, research_context))
         if result is None:
-            print(f"    Gemini失敗 → Groqフォールバック")
-            result = call_llm(build_report_prompt(content, category, research_context))
-        else:
-            print(f"    ✓ [Gemini] レポート生成完了")
+            print(f"    ✗ Gemini レポート生成失敗 — スキップ")
+            return None
+        print(f"    ✓ [Gemini] レポート生成完了")
     else:
-        result = call_llm(build_report_prompt(content, category, research_context))
-
-    if result is None:
-        return None
+        # Gemini 未設定時のみ Groq でフォールバック (非推奨)
+        print(f"    ⚠ Gemini未設定のためGroqでレポート生成(非推奨)")
+        result = call_llm_report(build_report_prompt(content, category, research_context))
+        if result is None:
+            return None
 
     # スクリーニング結果で補完
     result.setdefault("title", screening.get("title", ""))
@@ -1082,259 +1105,413 @@ def generate_html(db: list[dict], run_log: list[dict]) -> None:
 # HTML テンプレート (既存のものを流用 + XSS対策のみ追加)
 # ─────────────────────────────────────────────
 def _build_index_html() -> str:
-    # 元の HTML とほぼ同じだが、marked.js に DOMPurify を追加、
-    # 「調査補完済み」バッジを表示できるようにした
+    """シンプル・可読性優先の1カラム UI"""
     return """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CIPHER // THREAT INTELLIGENCE</title>
+<title>CIPHER // Threat Intel</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;--text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;--MALWARE:#ff4455;--INITIAL:#f0c040;--POST_EXP:#b06aff;--AI_SEC:#38bfff;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans JP',sans-serif;--disp:'Rajdhani',sans-serif}
+:root{
+  --bg:#0f1419; --surf:#1a1f29; --surf2:#232834; --bdr:#2a3140;
+  --text:#c8d1dc; --muted:#7a8699; --hi:#ffffff;
+  --acc:#4fc3f7; --acc2:#ffb74d;
+  --MAL:#ef5350; --INIT:#ffb74d; --POST:#ba68c8; --AI:#4fc3f7;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans','Noto Sans JP',sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
-.layout{display:flex;height:100vh;overflow:hidden}
-.sidebar{width:240px;flex-shrink:0;background:var(--surf);border-right:1px solid var(--bdr);display:flex;flex-direction:column}
-.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(--bdr)}
-.logo-name{font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;color:var(--acc)}
-.logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
-.logo-log-link{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);padding:3px 8px;border-radius:2px}
-.logo-log-link:hover{color:var(--acc2);border-color:var(--acc2)}
-.search-wrap{padding:10px 12px;border-bottom:1px solid var(--bdr)}
-#search-box-desk{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--bdr);color:var(--hi);border-radius:3px;outline:none;font-family:var(--mono);font-size:.72rem}
-#search-box-desk:focus{border-color:var(--acc)}
-.filter-wrap{padding:8px 10px;border-bottom:1px solid var(--bdr);display:flex;gap:4px;flex-wrap:wrap}
-.cat-btn{padding:3px 9px;border-radius:2px;border:1px solid var(--bdr2);background:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em}
-.cat-btn.active{background:rgba(56,191,255,.1);border-color:var(--acc);color:var(--acc)}
-.date-list{flex:1;overflow-y:auto;padding:8px}
-.date-item{padding:7px 10px;border-radius:3px;cursor:pointer;font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-bottom:2px;display:flex;justify-content:space-between;border:1px solid transparent}
-.date-item:hover,.date-item.active{background:var(--surf2);color:var(--acc);border-color:var(--bdr2)}
-.date-badge{font-size:.58rem;background:var(--bdr);color:var(--muted);padding:1px 6px;border-radius:2px}
-.stats-bar{padding:10px 12px;border-top:1px solid var(--bdr);display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
-.stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
-.stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc)}
-.main-feed{flex:1;overflow-y:auto;padding:16px}
-.feed{max-width:860px;margin:0 auto}
-.day-label{font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);padding:14px 2px 8px;border-bottom:1px solid var(--bdr);margin-bottom:10px}
-.day-label::before{content:'// ';color:var(--acc)}
-.card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:15px 16px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden}
-.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px}
-.card[data-cat="MALWARE"]::before{background:var(--MALWARE)}
-.card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
-.card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
-.card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
-.card:hover{background:var(--surf2);border-color:var(--bdr2)}
-.card-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
-.cat-tag{font-family:var(--mono);font-size:.58rem;font-weight:700;padding:2px 8px;border-radius:2px}
-.cat-tag[data-cat="MALWARE"]{background:rgba(255,68,85,.12);color:var(--MALWARE);border:1px solid rgba(255,68,85,.25)}
-.cat-tag[data-cat="INITIAL"]{background:rgba(240,192,64,.12);color:var(--INITIAL);border:1px solid rgba(240,192,64,.25)}
-.cat-tag[data-cat="POST_EXP"]{background:rgba(176,106,255,.12);color:var(--POST_EXP);border:1px solid rgba(176,106,255,.25)}
-.cat-tag[data-cat="AI_SEC"]{background:rgba(56,191,255,.08);color:var(--AI_SEC);border:1px solid rgba(56,191,255,.2)}
-.card-date{font-family:var(--mono);font-size:.6rem;color:var(--muted)}
-.research-badge{font-family:var(--mono);font-size:.55rem;background:rgba(176,106,255,.12);color:#c084fc;border:1px solid rgba(176,106,255,.3);padding:1px 6px;border-radius:2px}
-.cvss-badge{font-family:var(--mono);font-size:.58rem;font-weight:700;padding:2px 7px;border-radius:2px;margin-left:auto}
-.cvss-critical{background:rgba(255,68,85,.12);color:#ff4455;border:1px solid rgba(255,68,85,.3)}
-.cvss-high{background:rgba(240,192,64,.12);color:#f0c040;border:1px solid rgba(240,192,64,.3)}
-.cvss-medium{background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3)}
-.cvss-low{background:rgba(56,191,255,.08);color:#38bfff;border:1px solid rgba(56,191,255,.2)}
-.card-title{font-family:var(--disp);font-size:1.05rem;font-weight:600;color:var(--hi);line-height:1.4;margin-bottom:9px}
-.card-summary{font-size:.78rem;color:var(--text);line-height:1.7;list-style:none;padding:0}
-.card-summary li{padding:1px 0 1px 14px;position:relative}
-.card-summary li::before{content:'›';position:absolute;left:0;color:var(--acc);font-weight:700}
-.card-footer{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap}
-.mitre-chip{font-family:var(--mono);font-size:.56rem;background:rgba(176,106,255,.08);color:#c084fc;border:1px solid rgba(176,106,255,.18);padding:2px 6px;border-radius:2px}
-.cve-chip{font-family:var(--mono);font-size:.56rem;background:rgba(240,192,64,.08);color:var(--acc2);border:1px solid rgba(240,192,64,.2);padding:2px 6px;border-radius:2px}
-.poc-chip{font-family:var(--mono);font-size:.56rem;background:rgba(56,191,255,.07);color:var(--acc);border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px}
-.no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
-#detail{position:fixed;inset:0;background:var(--bg);z-index:200;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s}
-#detail.open{transform:none}
-.det-header{background:var(--surf);border-bottom:1px solid var(--bdr);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
-.back-btn{background:none;border:1px solid var(--bdr2);color:var(--acc);padding:6px 14px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.68rem;font-weight:700}
-.det-url{margin-left:auto;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none}
-.det-body{flex:1;overflow-y:auto;padding:32px 20px}
-.det-inner{max-width:800px;margin:0 auto}
-.det-title{font-family:var(--disp);font-size:1.65rem;font-weight:700;color:var(--hi);line-height:1.3;margin-bottom:16px}
-.det-meta-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--bdr)}
-.poc-btn{display:inline-flex;gap:6px;background:rgba(56,191,255,.08);color:var(--acc);border:1px solid rgba(56,191,255,.25);padding:8px 16px;border-radius:3px;text-decoration:none;font-family:var(--mono);font-weight:700;font-size:.7rem}
-.det-inner h2{font-family:var(--disp);font-size:1rem;font-weight:700;color:var(--acc);letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin:30px 0 12px}
-.det-inner h3{font-size:.92rem;font-weight:600;color:var(--hi);margin:16px 0 7px}
-.det-inner p{line-height:1.8;margin-bottom:10px;color:var(--text)}
-.det-inner ul,.det-inner ol{padding-left:20px;margin-bottom:10px;line-height:1.8}
-.det-inner pre{background:#040c1a;border:1px solid var(--bdr2);border-left:2px solid var(--acc);border-radius:3px;padding:16px;overflow-x:auto;margin:14px 0;position:relative}
-.det-inner code{font-family:var(--mono);font-size:.78rem;color:var(--acc)}
-.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;color:var(--acc2)}
-.det-inner strong{color:var(--hi)}
-.copy-btn{position:absolute;top:8px;right:8px;background:var(--surf2);border:1px solid var(--bdr2);color:var(--muted);font-family:var(--mono);font-size:.58rem;padding:3px 7px;border-radius:2px;cursor:pointer}
-::-webkit-scrollbar{width:4px;height:4px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:10px}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Header */
+.hdr{
+  position:sticky;top:0;z-index:50;background:rgba(15,20,25,.95);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--bdr);
+  padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+}
+.hdr-title{font-size:1.15rem;font-weight:700;color:var(--hi);letter-spacing:.02em}
+.hdr-title span{color:var(--acc)}
+.hdr-sub{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.hdr-stats{margin-left:auto;display:flex;gap:14px;font-family:var(--mono);font-size:.75rem;color:var(--muted)}
+.hdr-stats b{color:var(--hi);font-weight:700}
+.hdr-log{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:1px solid var(--bdr);padding:5px 10px;border-radius:4px}
+.hdr-log:hover{color:var(--acc);border-color:var(--acc);text-decoration:none}
+
+/* Filter bar */
+.ctrl{
+  max-width:900px;margin:0 auto;padding:18px 20px 8px;
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+}
+#search{
+  flex:1;min-width:200px;padding:10px 14px;background:var(--surf);
+  border:1px solid var(--bdr);color:var(--hi);border-radius:6px;
+  font-family:var(--sans);font-size:.9rem;outline:none;
+}
+#search:focus{border-color:var(--acc)}
+#search::placeholder{color:var(--muted)}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{
+  padding:6px 12px;background:var(--surf);border:1px solid var(--bdr);
+  color:var(--muted);border-radius:20px;cursor:pointer;
+  font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.03em;
+  transition:all .15s;
+}
+.fbtn:hover{color:var(--text);border-color:var(--muted)}
+.fbtn.on{background:var(--acc);color:#000;border-color:var(--acc)}
+
+/* Feed */
+.feed{max-width:900px;margin:0 auto;padding:0 20px 60px}
+.day{
+  font-family:var(--mono);font-size:.72rem;color:var(--muted);
+  letter-spacing:.1em;margin:24px 0 10px;padding-bottom:6px;
+  border-bottom:1px solid var(--bdr);
+}
+.day.today{color:var(--acc)}
+
+/* Card */
+.card{
+  background:var(--surf);border:1px solid var(--bdr);border-radius:8px;
+  padding:18px 20px;margin-bottom:12px;cursor:pointer;
+  transition:border-color .15s, transform .1s;
+}
+.card:hover{border-color:var(--muted)}
+.card:active{transform:scale(.998)}
+.card-top{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.tag{
+  font-family:var(--mono);font-size:.65rem;font-weight:700;
+  padding:3px 9px;border-radius:3px;letter-spacing:.04em;
+}
+.tag.MALWARE{background:rgba(239,83,80,.15);color:var(--MAL)}
+.tag.INITIAL{background:rgba(255,183,77,.15);color:var(--INIT)}
+.tag.POST_EXP{background:rgba(186,104,200,.15);color:var(--POST)}
+.tag.AI_SEC{background:rgba(79,195,247,.15);color:var(--AI)}
+.meta{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.cvss{
+  font-family:var(--mono);font-size:.68rem;font-weight:700;
+  padding:2px 8px;border-radius:3px;margin-left:auto;
+}
+.cvss.crit{background:rgba(239,83,80,.15);color:var(--MAL)}
+.cvss.high{background:rgba(255,183,77,.15);color:var(--INIT)}
+.cvss.med{background:rgba(255,213,79,.15);color:#ffd54f}
+.cvss.low{background:rgba(79,195,247,.15);color:var(--AI)}
+.researched{
+  font-family:var(--mono);font-size:.62rem;font-weight:700;
+  background:rgba(186,104,200,.15);color:var(--POST);
+  padding:2px 8px;border-radius:3px;
+}
+.title{
+  font-size:1.12rem;font-weight:700;color:var(--hi);
+  line-height:1.45;margin-bottom:8px;letter-spacing:-.005em;
+}
+.sum{list-style:none;padding:0;margin:0}
+.sum li{
+  padding:3px 0 3px 16px;position:relative;color:var(--text);
+  font-size:.88rem;line-height:1.65;
+}
+.sum li::before{content:'•';position:absolute;left:4px;color:var(--acc)}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:12px}
+.chip{
+  font-family:var(--mono);font-size:.65rem;padding:2px 8px;border-radius:3px;
+  background:var(--surf2);color:var(--muted);border:1px solid var(--bdr);
+}
+.chip.cve{color:var(--INIT);border-color:rgba(255,183,77,.3)}
+.chip.mitre{color:var(--POST);border-color:rgba(186,104,200,.3)}
+.chip.poc{color:var(--AI);border-color:rgba(79,195,247,.3);font-weight:700}
+.src{
+  display:block;margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr);
+  font-family:var(--mono);font-size:.68rem;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.src:hover{color:var(--acc);text-decoration:none}
+.empty{
+  text-align:center;padding:80px 20px;color:var(--muted);
+  font-family:var(--mono);font-size:.85rem;
+}
+
+/* Detail overlay */
+#det{
+  position:fixed;inset:0;background:var(--bg);z-index:100;
+  display:none;flex-direction:column;overflow:hidden;
+}
+#det.open{display:flex}
+.det-hdr{
+  position:sticky;top:0;background:rgba(15,20,25,.95);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--bdr);padding:12px 20px;
+  display:flex;align-items:center;gap:12px;flex-shrink:0;
+}
+.back{
+  background:var(--surf);border:1px solid var(--bdr);color:var(--text);
+  padding:7px 16px;border-radius:6px;cursor:pointer;
+  font-family:var(--mono);font-size:.75rem;font-weight:600;
+}
+.back:hover{border-color:var(--acc);color:var(--acc)}
+.det-src{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.det-body{flex:1;overflow-y:auto;padding:30px 20px 60px}
+.det-in{max-width:780px;margin:0 auto}
+.det-title{
+  font-size:1.7rem;font-weight:700;color:var(--hi);
+  line-height:1.3;margin-bottom:14px;letter-spacing:-.01em;
+}
+.det-meta{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--bdr);
+}
+.poc-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  background:var(--AI);color:#000;padding:8px 16px;border-radius:6px;
+  font-family:var(--mono);font-weight:700;font-size:.78rem;
+}
+.poc-btn:hover{text-decoration:none;opacity:.9}
+
+/* Markdown body */
+.md h1{display:none}
+.md h2{
+  font-size:1.15rem;font-weight:700;color:var(--hi);
+  margin:32px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--bdr);
+  letter-spacing:-.005em;
+}
+.md h3{font-size:.98rem;font-weight:700;color:var(--acc2);margin:20px 0 8px}
+.md p{margin:10px 0;color:var(--text)}
+.md ul,.md ol{padding-left:24px;margin:10px 0}
+.md li{margin:5px 0;color:var(--text)}
+.md strong{color:var(--hi);font-weight:700}
+.md code{
+  font-family:var(--mono);font-size:.85em;background:var(--surf2);
+  color:var(--acc2);padding:2px 6px;border-radius:3px;
+}
+.md pre{
+  background:#0a0d12;border:1px solid var(--bdr);border-left:3px solid var(--acc);
+  border-radius:6px;padding:14px 16px;overflow-x:auto;margin:14px 0;
+  position:relative;
+}
+.md pre code{
+  background:none;color:#e0e6ed;padding:0;font-size:.82rem;line-height:1.7;
+}
+.md blockquote{
+  border-left:3px solid var(--bdr);padding:4px 14px;color:var(--muted);
+  margin:12px 0;background:var(--surf);
+}
+.md table{border-collapse:collapse;margin:14px 0;font-size:.85rem;width:100%}
+.md th,.md td{padding:8px 12px;border:1px solid var(--bdr);text-align:left}
+.md th{background:var(--surf2);color:var(--hi);font-weight:700}
+.copy{
+  position:absolute;top:8px;right:8px;background:var(--surf);border:1px solid var(--bdr);
+  color:var(--muted);font-family:var(--mono);font-size:.65rem;
+  padding:3px 9px;border-radius:4px;cursor:pointer;
+}
+.copy:hover{color:var(--acc);border-color:var(--acc)}
+
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+@media(max-width:600px){
+  .hdr{padding:12px 14px;gap:10px}
+  .hdr-title{font-size:1rem}
+  .hdr-stats{font-size:.7rem;gap:10px;width:100%;order:3}
+  .ctrl{padding:14px 14px 6px}
+  .feed{padding:0 14px 60px}
+  .card{padding:15px 16px}
+  .title{font-size:1.02rem}
+  .det-body{padding:24px 16px 50px}
+  .det-title{font-size:1.35rem}
+}
 </style>
 </head>
 <body>
-<div class="layout">
-  <nav class="sidebar">
-    <div class="logo-wrap">
-      <div class="logo-name">CIPHER</div>
-      <div class="logo-sub">// THREAT INTEL v4.0</div>
-      <a href="log.html" class="logo-log-link">📋 調査ログ</a>
-    </div>
-    <div class="search-wrap">
-      <input type="text" id="search-box-desk" placeholder="search intel..." autocomplete="off">
-    </div>
-    <div class="filter-wrap">
-      <button class="cat-btn active" data-cat="ALL">ALL</button>
-      <button class="cat-btn" data-cat="MALWARE">MAL</button>
-      <button class="cat-btn" data-cat="INITIAL">INIT</button>
-      <button class="cat-btn" data-cat="POST_EXP">POST</button>
-      <button class="cat-btn" data-cat="AI_SEC">AI</button>
-      <button class="cat-btn" data-cat="RESEARCHED">🔍 補完済</button>
-    </div>
-    <div class="date-list" id="date-list"></div>
-    <div class="stats-bar">
-      <div class="stat"><span class="stat-val" id="total-count">0</span>TOTAL</div>
-      <div class="stat"><span class="stat-val" id="today-count">0</span>TODAY</div>
-      <div class="stat"><span class="stat-val" id="research-count">0</span>RESEARCHED</div>
-    </div>
-  </nav>
-  <div class="main-feed">
-    <div class="feed" id="feed"></div>
+
+<header class="hdr">
+  <div>
+    <div class="hdr-title"><span>◆</span> CIPHER Threat Intel</div>
+    <div class="hdr-sub">// Red Team Reconnaissance</div>
+  </div>
+  <div class="hdr-stats">
+    <span><b id="stat-total">0</b> total</span>
+    <span><b id="stat-today">0</b> today</span>
+    <span><b id="stat-research">0</b> 🔍</span>
+  </div>
+  <a href="log.html" class="hdr-log">📋 実行ログ</a>
+</header>
+
+<div class="ctrl">
+  <input type="text" id="search" placeholder="🔍 タイトル・本文を検索..." autocomplete="off">
+  <div class="filters">
+    <button class="fbtn on" data-cat="ALL">ALL</button>
+    <button class="fbtn" data-cat="MALWARE">MAL</button>
+    <button class="fbtn" data-cat="INITIAL">INIT</button>
+    <button class="fbtn" data-cat="POST_EXP">POST</button>
+    <button class="fbtn" data-cat="AI_SEC">AI</button>
+    <button class="fbtn" data-cat="RESEARCHED">🔍 補完済</button>
   </div>
 </div>
-<div id="detail">
-  <div class="det-header">
-    <button class="back-btn" onclick="closeDetail()">← BACK</button>
-    <div id="det-cat-tag"></div>
-    <a id="det-source-url" class="det-url" href="#" target="_blank">[ SOURCE ]</a>
+
+<main class="feed" id="feed"></main>
+
+<div id="det">
+  <div class="det-hdr">
+    <button class="back" onclick="closeDet()">← 戻る</button>
+    <a id="det-src-link" class="det-src" href="#" target="_blank">元記事 ↗</a>
   </div>
-  <div class="det-body"><div class="det-inner" id="det-body"></div></div>
+  <div class="det-body">
+    <div class="det-in" id="det-body"></div>
+  </div>
 </div>
+
 <script src="articles.js"></script>
 <script>
-const db = window.__ARTICLES__ || [];
-let activeCat='ALL', activeDate='all';
+const db = (window.__ARTICLES__ || []).slice();
 const today = new Date().toISOString().slice(0,10);
-function cvssClass(s){const n=parseFloat(s);if(isNaN(n))return'';if(n>=9)return'cvss-critical';if(n>=7)return'cvss-high';if(n>=4)return'cvss-medium';return'cvss-low'}
-function isPocValid(u){return u&&u.startsWith('http')}
-const searchBox=document.getElementById('search-box-desk');
-if(searchBox) searchBox.oninput=render;
-function getQuery(){return (searchBox?.value||'').toLowerCase()}
-function init(){
-  document.getElementById('total-count').textContent=db.length;
-  document.getElementById('today-count').textContent=db.filter(a=>a.date===today).length;
-  document.getElementById('research-count').textContent=db.filter(a=>a.researched).length;
-  const counts={};db.forEach(a=>counts[a.date]=(counts[a.date]||0)+1);
-  const dates=Object.keys(counts).sort().reverse();
-  const dl=document.getElementById('date-list');
-  const allEl=document.createElement('div');
-  allEl.className='date-item active';allEl.dataset.date='all';
-  allEl.innerHTML=`<span>ALL DATES</span><span class="date-badge">${db.length}</span>`;
-  allEl.onclick=()=>setDate('all',allEl);dl.appendChild(allEl);
-  dates.forEach(d=>{
-    const el=document.createElement('div');
-    el.className='date-item';el.dataset.date=d;
-    el.innerHTML=`<span>${d}</span><span class="date-badge">${counts[d]}</span>`;
-    el.onclick=()=>setDate(d,el);dl.appendChild(el);
-  });
-  document.querySelectorAll('.filter-wrap .cat-btn').forEach(b=>{
-    b.onclick=()=>{
-      document.querySelectorAll('.filter-wrap .cat-btn').forEach(x=>x.classList.remove('active'));
-      b.classList.add('active');activeCat=b.dataset.cat;render();
-    };
-  });
-  render();
+let activeCat = 'ALL';
+
+function cvssCls(s){
+  const n = parseFloat(s);
+  if (isNaN(n)) return '';
+  if (n >= 9) return 'crit';
+  if (n >= 7) return 'high';
+  if (n >= 4) return 'med';
+  return 'low';
 }
-function setDate(d,el){
-  activeDate=d;
-  document.querySelectorAll('.date-item').forEach(i=>i.classList.remove('active'));
-  el.classList.add('active');render();
-}
+function pocOk(u){ return u && u.startsWith('http'); }
+function esc(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+document.getElementById('stat-total').textContent = db.length;
+document.getElementById('stat-today').textContent = db.filter(a => a.date === today).length;
+document.getElementById('stat-research').textContent = db.filter(a => a.researched).length;
+
+document.querySelectorAll('.fbtn').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.fbtn').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    activeCat = b.dataset.cat;
+    render();
+  };
+});
+document.getElementById('search').oninput = render;
+
 function render(){
-  const q=getQuery();
-  const feed=document.getElementById('feed');
-  feed.innerHTML='';
-  const filtered=db.filter(a=>{
-    if(activeCat==='RESEARCHED') return a.researched;
-    const mc=activeCat==='ALL'||a.category===activeCat;
-    const md=activeDate==='all'||a.date===activeDate;
-    const mq=!q||(a.title+(a.summary_points||[]).join(' ')+a.content).toLowerCase().includes(q);
-    return mc&&md&&mq;
+  const q = document.getElementById('search').value.toLowerCase();
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+
+  const filtered = db.filter(a => {
+    if (activeCat === 'RESEARCHED') return a.researched;
+    if (activeCat !== 'ALL' && a.category !== activeCat) return false;
+    if (q) {
+      const hay = (a.title + ' ' + (a.summary_points||[]).join(' ') + ' ' + a.content).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
   });
-  if(!filtered.length){feed.innerHTML='<div class="no-data">// NO INTELLIGENCE FOUND //</div>';return;}
-  const groups={};
-  filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a)});
-  const frag=document.createDocumentFragment();
-  Object.keys(groups).sort().reverse().forEach(date=>{
-    const lbl=document.createElement('div');
-    lbl.className='day-label';lbl.textContent=date;
-    frag.appendChild(lbl);
-    groups[date].forEach(a=>{
-      const card=document.createElement('div');
-      card.className='card';card.dataset.cat=a.category;
-      const pts=(a.summary_points||[]).slice(0,3);
-      const sumHtml='<ul class="card-summary">'+pts.map(p=>`<li>${p}</li>`).join('')+'</ul>';
-      const cvssHtml=a.cvss_score?`<span class="cvss-badge ${cvssClass(a.cvss_score)}">CVSS ${a.cvss_score}</span>`:'';
-      const researchHtml=a.researched?'<span class="research-badge">🔍 補完済</span>':'';
-      const mitreHtml=(a.mitre_ids||[]).slice(0,3).map(id=>`<span class="mitre-chip">${id}</span>`).join('');
-      const cveHtml=(a.cve_ids||[]).slice(0,2).map(c=>`<span class="cve-chip">${c}</span>`).join('');
-      const pocHtml=isPocValid(a.poc_url)?'<span class="poc-chip">⚡ PoC</span>':'';
-      card.innerHTML=`
-        <div class="card-meta">
-          <span class="cat-tag" data-cat="${a.category}">${a.category}</span>
-          <span class="card-date">${a.date}</span>${researchHtml}${cvssHtml}
+
+  if (!filtered.length) {
+    feed.innerHTML = '<div class="empty">// 該当する情報がありません</div>';
+    return;
+  }
+
+  // 日付でグループ化
+  const groups = {};
+  filtered.forEach(a => {
+    (groups[a.date] = groups[a.date] || []).push(a);
+  });
+
+  const frag = document.createDocumentFragment();
+  Object.keys(groups).sort().reverse().forEach(date => {
+    const dayEl = document.createElement('div');
+    dayEl.className = 'day' + (date === today ? ' today' : '');
+    dayEl.textContent = date === today ? date + '  ● TODAY' : date;
+    frag.appendChild(dayEl);
+
+    groups[date].forEach(a => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const pts = (a.summary_points || []).slice(0, 3);
+      const sumHtml = pts.length
+        ? '<ul class="sum">' + pts.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>'
+        : '';
+      const cvssHtml = a.cvss_score
+        ? '<span class="cvss ' + cvssCls(a.cvss_score) + '">CVSS ' + esc(a.cvss_score) + '</span>'
+        : '';
+      const resHtml = a.researched ? '<span class="researched">🔍 補完済</span>' : '';
+      const cveHtml = (a.cve_ids || []).slice(0, 3).map(c => '<span class="chip cve">' + esc(c) + '</span>').join('');
+      const mitreHtml = (a.mitre_ids || []).slice(0, 4).map(m => '<span class="chip mitre">' + esc(m) + '</span>').join('');
+      const pocHtml = pocOk(a.poc_url) ? '<span class="chip poc">⚡ PoC</span>' : '';
+      let host = a.url;
+      try { host = new URL(a.url).hostname.replace(/^www\\./, ''); } catch(e){}
+
+      card.innerHTML = `
+        <div class="card-top">
+          <span class="tag ${a.category}">${a.category}</span>
+          <span class="meta">${a.date}</span>
+          ${resHtml}
+          ${cvssHtml}
         </div>
-        <div class="card-title">${a.title}</div>
+        <div class="title">${esc(a.title)}</div>
         ${sumHtml}
-        <div class="card-footer">${cveHtml}${mitreHtml}${pocHtml}</div>`;
-      card.onclick=()=>openDetail(a);
+        ${(cveHtml || mitreHtml || pocHtml) ? '<div class="chips">' + cveHtml + mitreHtml + pocHtml + '</div>' : ''}
+        <a class="src" href="${esc(a.url)}" target="_blank" onclick="event.stopPropagation()">📎 ${esc(host)}</a>
+      `;
+      card.onclick = () => openDet(a);
       frag.appendChild(card);
     });
   });
   feed.appendChild(frag);
 }
-function openDetail(a){
-  const body=document.getElementById('det-body');
-  let metaHtml='';
-  if(a.cvss_score) metaHtml+=`<span class="cvss-badge ${cvssClass(a.cvss_score)}" style="font-size:.68rem;padding:4px 10px">CVSS ${a.cvss_score}</span>`;
-  (a.cve_ids||[]).forEach(c=>{metaHtml+=`<span class="cve-chip">${c}</span>`});
-  (a.mitre_ids||[]).forEach(id=>{metaHtml+=`<span class="mitre-chip">${id}</span>`});
-  if(isPocValid(a.poc_url)) metaHtml+=`<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoC Repository</a>`;
-  if(a.researched) metaHtml+='<span class="research-badge">🔍 エージェント補完済</span>';
-  const rendered = DOMPurify.sanitize(marked.parse(a.content));
-  body.innerHTML=`
-    <div class="det-title">${a.title}</div>
-    <div class="det-meta-row">
-      <span class="cat-tag" data-cat="${a.category}" style="font-size:.66rem;padding:3px 10px">${a.category}</span>
-      <span style="font-family:var(--mono);font-size:.62rem;color:var(--muted)">${a.date}</span>
-      ${metaHtml}
+
+function openDet(a){
+  const body = document.getElementById('det-body');
+  let meta = '<span class="tag ' + a.category + '">' + a.category + '</span>';
+  meta += '<span class="meta">' + a.date + '</span>';
+  if (a.cvss_score) meta += '<span class="cvss ' + cvssCls(a.cvss_score) + '">CVSS ' + esc(a.cvss_score) + '</span>';
+  if (a.researched) meta += '<span class="researched">🔍 エージェント補完済</span>';
+  (a.cve_ids || []).forEach(c => meta += '<span class="chip cve">' + esc(c) + '</span>');
+  (a.mitre_ids || []).forEach(m => meta += '<span class="chip mitre">' + esc(m) + '</span>');
+  if (pocOk(a.poc_url)) meta += '<a href="' + esc(a.poc_url) + '" target="_blank" class="poc-btn">⚡ PoC Repository</a>';
+
+  const rendered = DOMPurify.sanitize(marked.parse(a.content || ''));
+
+  body.innerHTML = `
+    <div class="det-title">${esc(a.title)}</div>
+    <div class="det-meta">${meta}</div>
+    <div class="md">${rendered}</div>
+    <div style="margin-top:36px;padding-top:18px;border-top:1px solid var(--bdr)">
+      <div style="font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-bottom:6px">// SOURCE</div>
+      <a href="${esc(a.url)}" target="_blank" style="font-family:var(--mono);font-size:.8rem;word-break:break-all">${esc(a.url)}</a>
     </div>
-    ${rendered}
-    <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bdr)">
-      <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted)">// SOURCE</span><br>
-      <a href="${a.url}" target="_blank" style="font-family:var(--mono);font-size:.75rem;color:var(--acc2);word-break:break-all">${a.url}</a>
-    </div>`;
-  body.querySelectorAll('pre').forEach(pre=>{
-    const btn=document.createElement('button');
-    btn.className='copy-btn';btn.textContent='COPY';
-    btn.onclick=e=>{
+  `;
+
+  // Copy buttons on code blocks
+  body.querySelectorAll('pre').forEach(pre => {
+    const btn = document.createElement('button');
+    btn.className = 'copy';
+    btn.textContent = 'COPY';
+    btn.onclick = (e) => {
       e.stopPropagation();
-      const txt=pre.querySelector('code')?.textContent||pre.textContent;
-      navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓';setTimeout(()=>btn.textContent='COPY',1500)});
+      const txt = pre.querySelector('code')?.textContent || pre.textContent;
+      navigator.clipboard.writeText(txt).then(() => {
+        btn.textContent = '✓ OK';
+        setTimeout(() => btn.textContent = 'COPY', 1500);
+      });
     };
     pre.appendChild(btn);
   });
-  document.getElementById('det-cat-tag').innerHTML=`<span class="cat-tag" data-cat="${a.category}" style="font-size:.66rem;padding:3px 10px">${a.category}</span>`;
-  document.getElementById('det-source-url').href=a.url;
-  document.getElementById('detail').classList.add('open');
-  history.pushState({view:'detail'},'');
+
+  document.getElementById('det-src-link').href = a.url;
+  document.getElementById('det').classList.add('open');
+  history.pushState({view:'detail'}, '');
 }
-function closeDetail(){document.getElementById('detail').classList.remove('open')}
-window.onpopstate=()=>closeDetail();
-init();
+
+function closeDet(){
+  document.getElementById('det').classList.remove('open');
+}
+window.onpopstate = () => closeDet();
+
+render();
 </script>
 </body>
 </html>"""
@@ -1346,66 +1523,122 @@ def _build_log_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CIPHER // RUN LOG</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<title>CIPHER // Run Log</title>
 <style>
-:root{--bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;--text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;--MALWARE:#ff4455;--mono:'JetBrains Mono',monospace;--disp:'Rajdhani',sans-serif}
+:root{
+  --bg:#0f1419; --surf:#1a1f29; --surf2:#232834; --bdr:#2a3140;
+  --text:#c8d1dc; --muted:#7a8699; --hi:#ffffff;
+  --acc:#4fc3f7; --acc2:#ffb74d; --err:#ef5350;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Sans','Noto Sans JP',sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px 40px}
-.page{max-width:720px;margin:0 auto}
-.back-link{display:inline-block;font-family:var(--mono);font-size:.65rem;color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);padding:4px 10px;border-radius:2px;margin-bottom:14px}
-.back-link:hover{color:var(--acc);border-color:var(--acc)}
-.page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);letter-spacing:.1em}
-.page-sub{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.15em;margin-top:4px}
-.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}
-.stat-card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:14px;text-align:center}
-.stat-card-val{font-family:var(--disp);font-size:1.5rem;font-weight:700;color:var(--acc);display:block}
-.stat-card-lbl{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.1em;margin-top:3px}
-.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf)}
-.log-row:hover{background:var(--surf2)}
-.log-row-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1}
-.badge-new{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px}
-.badge-research{font-family:var(--mono);font-size:.55rem;background:rgba(176,106,255,.12);color:#c084fc;border:1px solid rgba(176,106,255,.3);padding:1px 6px;border-radius:2px}
-.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px}
-.no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted)}
-@media(max-width:500px){.summary-row{grid-template-columns:1fr 1fr}}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6;padding:30px 20px 60px}
+.wrap{max-width:780px;margin:0 auto}
+.back{
+  display:inline-block;font-family:var(--mono);font-size:.75rem;
+  color:var(--muted);border:1px solid var(--bdr);padding:6px 12px;
+  border-radius:6px;text-decoration:none;margin-bottom:20px;
+}
+.back:hover{color:var(--acc);border-color:var(--acc)}
+h1{font-size:1.6rem;font-weight:700;color:var(--hi);letter-spacing:-.01em;margin-bottom:4px}
+h1 span{color:var(--acc)}
+.sub{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin-bottom:24px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:30px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}}
+.stat{
+  background:var(--surf);border:1px solid var(--bdr);border-radius:8px;
+  padding:16px;text-align:center;
+}
+.stat b{display:block;font-size:1.5rem;font-weight:700;color:var(--hi)}
+.stat .lbl{font-family:var(--mono);font-size:.65rem;color:var(--muted);letter-spacing:.05em;margin-top:4px}
+.stat.warn b{color:var(--err)}
+.section{
+  font-family:var(--mono);font-size:.7rem;color:var(--muted);
+  letter-spacing:.08em;margin-bottom:10px;
+}
+.row{
+  background:var(--surf);border:1px solid var(--bdr);border-radius:6px;
+  padding:12px 16px;margin-bottom:6px;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+.row.today{border-left:3px solid var(--acc)}
+.row.tpd{border-left:3px solid var(--err);background:rgba(239,83,80,.04)}
+.dt{font-family:var(--mono);font-size:.82rem;color:var(--hi);flex:1;min-width:130px}
+.badge{
+  font-family:var(--mono);font-size:.68rem;padding:2px 8px;border-radius:3px;font-weight:700;
+}
+.badge.new{background:rgba(79,195,247,.15);color:var(--acc)}
+.badge.zero{color:var(--muted);background:var(--surf2)}
+.badge.res{background:rgba(186,104,200,.15);color:#ba68c8}
+.badge.tpd{background:rgba(239,83,80,.15);color:var(--err)}
+.badge.tdy{background:rgba(79,195,247,.15);color:var(--acc)}
+.total{font-family:var(--mono);font-size:.68rem;color:var(--muted);margin-left:auto}
+.cats{margin-top:8px;display:flex;gap:12px;flex-wrap:wrap;width:100%}
+.cat-r{font-family:var(--mono);font-size:.68rem;font-weight:700}
+.cat-r.ok{color:var(--acc)}
+.cat-r.zero{color:var(--muted)}
+.cat-r.err{color:var(--err)}
+.empty{text-align:center;padding:60px 20px;color:var(--muted);font-family:var(--mono)}
 </style>
 </head>
 <body>
-<div class="page">
-  <a href="index.html" class="back-link">← CIPHER</a>
-  <div class="page-title">RUN LOG</div>
-  <div class="page-sub">// AI調査実行履歴 (v4.0 調査フェーズ対応)</div>
-  <div class="summary-row" id="summary-row"></div>
-  <div id="log-wrap"></div>
+<div class="wrap">
+  <a href="index.html" class="back">← CIPHER</a>
+  <h1><span>◆</span> Run Log</h1>
+  <div class="sub">// AI調査実行履歴</div>
+  <div class="grid" id="summary"></div>
+  <div class="section">// 実行履歴 (新しい順)</div>
+  <div id="rows"></div>
 </div>
 <script src="log.js"></script>
 <script>
-const log=(window.__RUN_LOG__||[]).slice().reverse();
-const totalRuns=log.length;
-const totalNew=log.reduce((s,r)=>s+(r.new_articles||0),0);
-const totalResearch=log.reduce((s,r)=>s+(r.researched_count||0),0);
-const tpdCount=log.filter(r=>r.tpd_exhausted).length;
-const lastRun=log[0]?.datetime_jst||'—';
-document.getElementById('summary-row').innerHTML=`
-  <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">RUNS</div></div>
-  <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES</div></div>
-  <div class="stat-card"><span class="stat-card-val">${totalResearch}</span><div class="stat-card-lbl">RESEARCHED</div></div>
-  <div class="stat-card"><span class="stat-card-val" style="font-size:.9rem;padding-top:6px">${lastRun}</span><div class="stat-card-lbl">LAST RUN</div></div>`;
-const wrap=document.getElementById('log-wrap');
-if(!log.length){wrap.innerHTML='<div class="no-log">// 実行ログなし</div>';}
-else{
-  wrap.innerHTML=log.map(r=>{
-    const tpdBadge=r.tpd_exhausted?'<span class="badge-tpd">TPD</span>':'';
-    const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:'<span style="color:var(--muted);font-family:var(--mono);font-size:.55rem">±0</span>';
-    const rb=r.researched_count>0?`<span class="badge-research">🔍${r.researched_count}</span>`:'';
-    return `<div class="log-row">
-      <div class="log-row-main">
-        <span class="log-dt">${r.datetime_jst}</span>
-        ${nb}${rb}${tpdBadge}
-        <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted)">${r.total_articles||'—'} total</span>
-      </div>
+const log = (window.__RUN_LOG__ || []).slice().reverse();
+const today = new Date().toISOString().slice(0,10);
+const totalRuns = log.length;
+const totalNew = log.reduce((s,r) => s + (r.new_articles || 0), 0);
+const totalRes = log.reduce((s,r) => s + (r.researched_count || 0), 0);
+const tpdCount = log.filter(r => r.tpd_exhausted).length;
+const lastRun = log[0]?.datetime_jst || '—';
+
+document.getElementById('summary').innerHTML = `
+  <div class="stat"><b>${totalRuns}</b><div class="lbl">RUNS</div></div>
+  <div class="stat"><b>${totalNew}</b><div class="lbl">ARTICLES</div></div>
+  <div class="stat"><b>${totalRes}</b><div class="lbl">RESEARCHED</div></div>
+  <div class="stat ${tpdCount>0?'warn':''}"><b>${tpdCount}</b><div class="lbl">TPD ERRORS</div></div>
+`;
+
+const CAT_LBL = {MALWARE:'MAL', INITIAL:'INIT', POST_EXP:'POST', AI_SEC:'AI'};
+
+const rows = document.getElementById('rows');
+if (!log.length) {
+  rows.innerHTML = '<div class="empty">// 実行ログがありません</div>';
+} else {
+  rows.innerHTML = log.map(r => {
+    const isToday = r.datetime_jst?.startsWith(today);
+    const nb = r.new_articles > 0
+      ? `<span class="badge new">+${r.new_articles}</span>`
+      : `<span class="badge zero">±0</span>`;
+    const rb = r.researched_count > 0
+      ? `<span class="badge res">🔍${r.researched_count}</span>` : '';
+    const tpdB = r.tpd_exhausted ? '<span class="badge tpd">TPD枯渇</span>' : '';
+    const tdy = isToday ? '<span class="badge tdy">TODAY</span>' : '';
+
+    const cats = r.categories || {};
+    const catHtml = Object.entries(CAT_LBL).map(([id, lbl]) => {
+      const c = cats[id];
+      if (!c) return '';
+      const adopted = c.adopted || 0;
+      const cls = c.tpd_hit ? 'err' : adopted > 0 ? 'ok' : 'zero';
+      const icon = c.tpd_hit ? '⚠' : adopted > 0 ? '✓' : '—';
+      return `<span class="cat-r ${cls}">${lbl}: ${icon} ${adopted||''}</span>`;
+    }).join('');
+
+    return `<div class="row ${isToday?'today':''} ${r.tpd_exhausted?'tpd':''}">
+      <div class="dt">${r.datetime_jst}</div>
+      ${tdy}${nb}${rb}${tpdB}
+      <span class="total">total: ${r.total_articles||'—'}</span>
+      ${catHtml ? '<div class="cats">'+catHtml+'</div>' : ''}
     </div>`;
   }).join('');
 }
