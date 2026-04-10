@@ -250,5 +250,47 @@
       }
     },
     "feed_errors": []
+  },
+  {
+    "datetime_jst": "2026-04-10 12:35",
+    "new_articles": 0,
+    "total_articles": 54,
+    "researched_count": 0,
+    "tpd_exhausted": true,
+    "categories": {
+      "MALWARE": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "INITIAL": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "POST_EXP": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "AI_SEC": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "researched": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      }
+    },
+    "feed_errors": []
   }
 ]

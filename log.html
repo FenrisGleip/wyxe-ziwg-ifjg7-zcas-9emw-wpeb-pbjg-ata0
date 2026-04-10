@@ -3,139 +3,66 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='40%25'%3E%3Cstop offset='0' stop-color='%2338bfff' stop-opacity='.9'/%3E%3Cstop offset='1' stop-color='%230a1628' stop-opacity='1'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpolygon points='16,2 28,9 28,23 16,30 4,23 4,9' fill='%230d1a2e' stroke='%2338bfff' stroke-width='1.5'/%3E%3Cpolygon points='16,6 24,10.5 24,21.5 16,26 8,21.5 8,10.5' fill='none' stroke='%2338bfff' stroke-width='.6' stroke-opacity='.4'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='700' font-size='13' fill='url(%23g)' letter-spacing='-1'%3EC%3C/text%3E%3Ccircle cx='16' cy='16' r='1.2' fill='%2338bfff' opacity='.7'/%3E%3Cline x1='16' y1='6' x2='16' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='16' y1='23' x2='16' y2='26' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='4' y1='9' x2='6.5' y2='10.5' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='27.5' y1='10.5' x2='28' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3C/svg%3E">
 <title>CIPHER // RUN LOG</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;
-  --text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;
-  --mono:'JetBrains Mono',monospace;--sans:'Noto Sans JP',sans-serif;--disp:'Rajdhani',sans-serif;
-}
+:root{--bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;--text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;--MALWARE:#ff4455;--mono:'JetBrains Mono',monospace;--disp:'Rajdhani',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;padding:24px 16px 40px}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px 40px}
 .page{max-width:720px;margin:0 auto}
-.page-header{margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid var(--bdr);position:relative}
-.page-header::after{content:'';position:absolute;bottom:0;left:0;width:120px;height:1px;background:var(--acc)}
-.back-link{
-  display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.65rem;
-  color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);
-  padding:4px 10px;border-radius:2px;margin-bottom:14px;transition:.15s;
-}
+.back-link{display:inline-block;font-family:var(--mono);font-size:.65rem;color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);padding:4px 10px;border-radius:2px;margin-bottom:14px}
 .back-link:hover{color:var(--acc);border-color:var(--acc)}
-.page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);
-  letter-spacing:.1em;text-shadow:0 0 20px rgba(56,191,255,.25)}
+.page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);letter-spacing:.1em}
 .page-sub{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.15em;margin-top:4px}
-.summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
+.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}
 .stat-card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:14px;text-align:center}
-.stat-card-val{font-family:var(--disp);font-size:1.6rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 10px rgba(56,191,255,.25);display:block}
+.stat-card-val{font-family:var(--disp);font-size:1.5rem;font-weight:700;color:var(--acc);display:block}
 .stat-card-lbl{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.1em;margin-top:3px}
-.section-title{font-family:var(--mono);font-size:.62rem;letter-spacing:.15em;color:var(--muted);
-  margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
-.log-table{width:100%;border-collapse:collapse;font-size:.8rem}
-.log-table th{
-  background:var(--surf2);padding:9px 12px;text-align:left;
-  border:1px solid var(--bdr);color:var(--hi);
-  font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;
-}
-.log-table td{padding:9px 12px;border:1px solid var(--bdr);color:var(--text)}
-.log-table tr:hover td{background:var(--surf2)}
-.log-table tr.today-row td{color:var(--hi)}
-.badge-new{
-  font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);
-  color:var(--acc);border:1px solid rgba(56,191,255,.2);
-  padding:1px 6px;border-radius:2px;margin-left:6px;
-}
-.badge-zero{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
-.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px;font-weight:700}
-.badge-today{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px;margin-left:4px}
-.stat-card-warn .stat-card-val{color:var(--MALWARE)!important}
-.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf);transition:.15s}
+.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf)}
 .log-row:hover{background:var(--surf2)}
-.today-row{border-left:2px solid var(--acc)!important}
-.tpd-row{border-left:2px solid var(--MALWARE)!important;background:rgba(255,68,85,.02)!important}
 .log-row-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1;min-width:120px}
-.log-nb{font-family:var(--mono);font-size:.65rem}
-.log-total{font-family:var(--mono);font-size:.6rem;color:var(--muted);margin-left:auto}
-.log-row-cats{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
-.cat-result{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.04em}
-.feed-err-list{font-family:var(--mono);font-size:.58rem;color:var(--MALWARE);margin-top:4px;opacity:.8}
-.no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
-@media(max-width:500px){
-  .summary-row{grid-template-columns:1fr 1fr}
-  .log-table th:last-child,.log-table td:last-child{display:none}
-}
+.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1}
+.badge-new{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px}
+.badge-research{font-family:var(--mono);font-size:.55rem;background:rgba(176,106,255,.12);color:#c084fc;border:1px solid rgba(176,106,255,.3);padding:1px 6px;border-radius:2px}
+.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px}
+.no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted)}
+@media(max-width:500px){.summary-row{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div class="page">
-  <div class="page-header">
-    <a href="index.html" class="back-link">← CIPHER</a>
-    <div class="page-title">RUN LOG</div>
-    <div class="page-sub">// AI調査実行履歴</div>
-  </div>
+  <a href="index.html" class="back-link">← CIPHER</a>
+  <div class="page-title">RUN LOG</div>
+  <div class="page-sub">// AI調査実行履歴 (v4.0 調査フェーズ対応)</div>
   <div class="summary-row" id="summary-row"></div>
-  <div class="section-title">// 実行履歴（新しい順）</div>
   <div id="log-wrap"></div>
 </div>
 <script src="log.js"></script>
 <script>
-const log = (window.__RUN_LOG__ || []).slice().reverse();
-const today = new Date().toISOString().slice(0,10);
-const totalRuns = log.length;
-const totalNew  = log.reduce((s,r)=>s+(r.new_articles||0),0);
-const tpdCount  = log.filter(r=>r.tpd_exhausted).length;
-const lastRun   = log[0]?.datetime_jst || '—';
-document.getElementById('summary-row').innerHTML = `
-  <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">TOTAL RUNS</div></div>
-  <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES COLLECTED</div></div>
-  <div class="stat-card ${tpdCount>0?'stat-card-warn':''}"><span class="stat-card-val">${tpdCount}</span><div class="stat-card-lbl">TPD ERRORS</div></div>
-  <div class="stat-card"><span class="stat-card-val" style="font-size:1rem;padding-top:4px">${lastRun}</span><div class="stat-card-lbl">LAST RUN (JST)</div></div>`;
-
-const CAT_LABELS = {MALWARE:'MAL',INITIAL:'INIT',POST_EXP:'POST',AI_SEC:'AI'};
-
-const wrap = document.getElementById('log-wrap');
-if(!log.length){
-  wrap.innerHTML='<div class="no-log">// 実行ログがありません</div>';
-} else {
-  wrap.innerHTML = log.map(r=>{
-    const isToday = r.datetime_jst?.startsWith(today);
-    const tpdBadge = r.tpd_exhausted ? '<span class="badge-tpd">TPD上限</span>' : '';
-    const nb = r.new_articles>0
-      ? `<span class="badge-new">+${r.new_articles}</span>`
-      : `<span class="badge-zero">±0</span>`;
-
-    // カテゴリ別サマリー
-    const cats = r.categories || {};
-    const catHtml = Object.entries(CAT_LABELS).map(([id,lbl])=>{
-      const c = cats[id];
-      if(!c) return '';
-      const adopted = c.adopted || 0;
-      const tpd = c.tpd_hit;
-      const ferr = (c.feed_errors||[]).length;
-      const color = tpd ? 'var(--MALWARE)' : adopted > 0 ? 'var(--acc)' : 'var(--muted)';
-      const icon = tpd ? '⚠' : adopted > 0 ? '✓' : ferr > 0 ? '✗' : '—';
-      const title = tpd ? 'TPD上限' : ferr > 0 ? `フィードエラー ${ferr}件` : `採用 ${adopted}件`;
-      return `<span class="cat-result" style="color:${color}" title="${title}">${lbl}:${icon}${adopted>0?adopted:''}</span>`;
-    }).join('');
-
-    // フィードエラー一覧
-    const allFeedErrs = Object.values(cats).flatMap(c=>c.feed_errors||[]);
-    const feedErrHtml = allFeedErrs.length
-      ? `<div class="feed-err-list">Feed error: ${[...new Set(allFeedErrs)].join(', ')}</div>` : '';
-
-    return `<div class="log-row ${isToday?'today-row':''} ${r.tpd_exhausted?'tpd-row':''}">
+const log=(window.__RUN_LOG__||[]).slice().reverse();
+const totalRuns=log.length;
+const totalNew=log.reduce((s,r)=>s+(r.new_articles||0),0);
+const totalResearch=log.reduce((s,r)=>s+(r.researched_count||0),0);
+const tpdCount=log.filter(r=>r.tpd_exhausted).length;
+const lastRun=log[0]?.datetime_jst||'—';
+document.getElementById('summary-row').innerHTML=`
+  <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">RUNS</div></div>
+  <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES</div></div>
+  <div class="stat-card"><span class="stat-card-val">${totalResearch}</span><div class="stat-card-lbl">RESEARCHED</div></div>
+  <div class="stat-card"><span class="stat-card-val" style="font-size:.9rem;padding-top:6px">${lastRun}</span><div class="stat-card-lbl">LAST RUN</div></div>`;
+const wrap=document.getElementById('log-wrap');
+if(!log.length){wrap.innerHTML='<div class="no-log">// 実行ログなし</div>';}
+else{
+  wrap.innerHTML=log.map(r=>{
+    const tpdBadge=r.tpd_exhausted?'<span class="badge-tpd">TPD</span>':'';
+    const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:'<span style="color:var(--muted);font-family:var(--mono);font-size:.55rem">±0</span>';
+    const rb=r.researched_count>0?`<span class="badge-research">🔍${r.researched_count}</span>`:'';
+    return `<div class="log-row">
       <div class="log-row-main">
-        <span class="log-dt">${r.datetime_jst}${isToday?' <span class="badge-today">TODAY</span>':''}</span>
-        <span class="log-nb">${nb}</span>
-        ${tpdBadge}
-        <span class="log-total">${r.total_articles??'—'} total</span>
+        <span class="log-dt">${r.datetime_jst}</span>
+        ${nb}${rb}${tpdBadge}
+        <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted)">${r.total_articles||'—'} total</span>
       </div>
-      <div class="log-row-cats">${catHtml}</div>
-      ${feedErrHtml}
     </div>`;
   }).join('');
 }
