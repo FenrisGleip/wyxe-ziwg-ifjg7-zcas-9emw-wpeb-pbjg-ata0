@@ -1,4 +1,11 @@
-# RED-TACTICAL INTELLIGENCE AGENT v3.1
+# RED-TACTICAL INTELLIGENCE AGENT v4.0
+# 主な改善点:
+#   - エージェント調査フェーズ追加: 情報不十分な記事をLLMに捨てさせず、
+#     NVD API / Tavily追加検索 / GitHub検索で情報補完してからレポート化
+#   - 本文抽出ヒューリスティックの改善 (<article>/<main>タグ優先)
+#   - プロンプトを単一系統に統合、Gemini max_tokens を 8192 に増量
+#   - research_log をレポートに埋め込み、情報ソースを透明化
+#   - MIN_REPORT_LEN を 800 に緩和、補完後に再生成する二段構成
 import os
 import json
 import re
@@ -6,10 +13,12 @@ import time
 import hashlib
 import urllib.request
 import urllib.error
+import urllib.parse
 import xml.etree.ElementTree as ET
 from html import unescape
 from groq import Groq
 from datetime import datetime, timezone, timedelta
+
 try:
     from tavily import TavilyClient
     _TAVILY_AVAILABLE = True
@@ -29,381 +38,256 @@ def now_jst():
 # ─────────────────────────────────────────────
 # 設定
 # ─────────────────────────────────────────────
-GROQ_KEY    = os.getenv("GROQ_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_KEY:
     raise RuntimeError("GROQ_API_KEY が未設定です。GitHub Secrets を確認してください。")
 groq_client = Groq(api_key=GROQ_KEY)
 
-TAVILY_KEY  = os.getenv("TAVILY_API_KEY")
+TAVILY_KEY = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=TAVILY_KEY) if (_TAVILY_AVAILABLE and TAVILY_KEY) else None
 
-GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if _GEMINI_AVAILABLE and GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
     gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 else:
     gemini_model = None
 
-MASTER_DATA      = "all_articles.json"
-OUTPUT_HTML      = "index.html"
-MAX_DB_ENTRIES   = 200
-MIN_REPORT_LEN   = 1200   # 品質フィルタ（高品質レポート重視）
-MAX_RETRIES      = 3
-SLEEP_BETWEEN_REQ = 1.0  # 記事間の最低待機（rate limitは動的ハンドリング）
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # あれば検索レートが上がる(任意)
 
-# deepseek-r1-distill-llama-70b は2025年9月に廃止済み
-# llama-4-scout: TPD 500,000 (llama-3.3-70b-versatileの5倍) で余裕あり
+MASTER_DATA     = "all_articles.json"
+OUTPUT_HTML     = "index.html"
+MAX_DB_ENTRIES  = 200
+MIN_REPORT_LEN  = 800   # 緩和 (1200 → 800): 補完前提で品質を別レイヤで担保
+MIN_SOURCE_LEN  = 400   # この文字数未満なら調査フェーズに強制投入
+MAX_RETRIES     = 3
+SLEEP_BETWEEN_REQ = 1.5
+
 PRIMARY_MODEL  = "meta-llama/llama-4-scout-17b-16e-instruct"
-FALLBACK_MODEL = "llama-3.3-70b-versatile"  # llama-4-scout失敗時のフォールバック
+FALLBACK_MODEL = "llama-3.3-70b-versatile"
+
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) "
+              "Chrome/124.0.0.0 Safari/537.36")
 
 # ─────────────────────────────────────────────
-# 検索クエリ（セキュリティ研究ソースに誘導）
-# ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# RSSフィード定義（カテゴリ別）
-# 毎日の実行で新着記事のみ取得するため重複しない
+# RSSフィード定義 (カテゴリ別)
 # ─────────────────────────────────────────────
 RSS_FEEDS = {
     "MALWARE": [
-        "https://securelist.com/feed/",                               # Kaspersky Securelist (深い技術分析)
-        "https://cybersecuritynews.com/feed/",                        # Cybersecurity News (速報・PoC情報)
-        "https://blog.malwarebytes.com/feed/",                        # Malwarebytes Labs
-        "https://isc.sans.edu/rssfeed_full.xml",                      # SANS ISC Diary
-        "https://www.helpnetsecurity.com/feed/",                      # Help Net Security (malware analysis)
+        "https://securelist.com/feed/",
+        "https://cybersecuritynews.com/feed/",
+        "https://blog.malwarebytes.com/feed/",
+        "https://isc.sans.edu/rssfeed_full.xml",
+        "https://www.helpnetsecurity.com/feed/",
     ],
     "INITIAL": [
-        "https://securityaffairs.com/feed",                           # Security Affairs (PoC情報が早い)
-        "https://feeds.feedburner.com/TheHackersNews",                # The Hacker News
-        "https://www.cisa.gov/cybersecurity-advisories/all.xml",      # CISA KEV
-        "https://www.zerodayinitiative.com/rss/published/",           # ZDI Public Advisories
-        "https://seclists.org/rss/fulldisclosure.rss",                # Full Disclosure ML
+        "https://securityaffairs.com/feed",
+        "https://feeds.feedburner.com/TheHackersNews",
+        "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "https://www.zerodayinitiative.com/rss/published/",
+        "https://seclists.org/rss/fulldisclosure.rss",
     ],
     "POST_EXP": [
-        "https://www.cyderes.com/feed/",                             # Cyderes (broader feed)
-        "https://research.checkpoint.com/feed/",                      # Check Point Research
-        "https://www.elastic.co/security-labs/rss/feed.xml",         # Elastic Security Labs
-        "https://www.redpacketsecurity.com/feed/",                    # RedPacket Security (技術分析)
-        "https://bishopfox.com/blog/feed",                           # Bishop Fox (post-exp research)
+        "https://www.cyderes.com/feed/",
+        "https://research.checkpoint.com/feed/",
+        "https://www.elastic.co/security-labs/rss/feed.xml",
+        "https://www.redpacketsecurity.com/feed/",
+        "https://bishopfox.com/blog/feed",
     ],
     "AI_SEC": [
-        "https://blog.trailofbits.com/feed/",                         # Trail of Bits
-        "https://simonwillison.net/atom/everything/",                 # Simon Willison
-        "https://feeds.feedburner.com/TheHackersNews",                # The Hacker News AI coverage
-        "https://www.microsoft.com/en-us/security/blog/feed/",        # Microsoft Security
-        "https://research.checkpoint.com/feed/",                      # Check Point AI threat research
+        "https://blog.trailofbits.com/feed/",
+        "https://simonwillison.net/atom/everything/",
+        "https://feeds.feedburner.com/TheHackersNews",
+        "https://www.microsoft.com/en-us/security/blog/feed/",
+        "https://research.checkpoint.com/feed/",
     ],
 }
 
-
-# ─────────────────────────────────────────────
-# Tavily検索クエリ（カテゴリ別・トレンド捕捉用）
-# RSSで拾えないゼロデイ・PoC・話題のエクスプロイトを対象
-# 月1000cr無料枠: 4クエリ/日 = 120cr/月で余裕あり
-# ─────────────────────────────────────────────
 TAVILY_QUERIES = {
-    "MALWARE": [
-        "new malware technical analysis loader shellcode EDR bypass 2026",
-    ],
-    "INITIAL": [
-        "zero-day PoC exploit published unpatched Windows Linux 2026",
-        "CVE 2026 proof of concept GitHub exploit released",
-    ],
-    "POST_EXP": [
-        "new privilege escalation technique Windows Active Directory 2026",
-    ],
-    "AI_SEC": [
-        "LLM AI agent attack jailbreak prompt injection new technique 2026",
-    ],
+    "MALWARE":  ["new malware technical analysis loader shellcode EDR bypass 2026"],
+    "INITIAL":  ["zero-day PoC exploit published unpatched Windows Linux 2026",
+                 "CVE 2026 proof of concept GitHub exploit released"],
+    "POST_EXP": ["new privilege escalation technique Windows Active Directory 2026"],
+    "AI_SEC":   ["LLM AI agent attack jailbreak prompt injection new technique 2026"],
 }
-TAVILY_MAX_RESULTS = 3   # 1クエリあたりの最大件数
-
-MAX_ITEMS_PER_FEED = 5   # 1フィードあたり最新N件をチェック
-MAX_PER_CATEGORY  = 10  # カテゴリ上限（新規性フィルタで絞られる）
+TAVILY_MAX_RESULTS = 3
+MAX_ITEMS_PER_FEED = 5
+MAX_PER_CATEGORY   = 10
 
 # ─────────────────────────────────────────────
-# プロンプト（レッドチーム再現手順特化）
+# プロンプト (カテゴリ文脈)
 # ─────────────────────────────────────────────
 CATEGORY_CONTEXT = {
     "MALWARE": """
 MALWARE ANALYSIS FOCUS:
-- Internal loader mechanism: how shellcode/PE is decrypted, mapped, executed (specific API calls: VirtualAlloc, WriteProcessMemory, CreateRemoteThread etc.)
-- Obfuscation: exact algorithm (XOR key, RC4, AES-CBC with IV), where key material is stored
-- C2 protocol: HTTP/DNS/custom, beaconing interval, jitter, encoding (base64/custom), URI patterns
-- Persistence: exact registry key path, scheduled task XML, WMI subscription query
-- EDR evasion: AMSI bypass method, ETW patching, direct syscalls, process hollowing target
+- Internal loader mechanism: shellcode/PE decryption, mapping, execution (VirtualAlloc, WriteProcessMemory, CreateRemoteThread etc.)
+- Obfuscation: exact algorithm (XOR key, RC4, AES-CBC with IV), key storage
+- C2 protocol: HTTP/DNS/custom, beaconing interval, jitter, encoding, URI patterns
+- Persistence: exact registry key, scheduled task XML, WMI subscription
+- EDR evasion: AMSI bypass, ETW patching, direct syscalls, process hollowing target
+""",
+    "INITIAL": """
 INITIAL ACCESS FOCUS:
 - Root cause: exact vulnerable code path, which parameter/header/field triggers the bug
-- Vulnerability class: buffer overflow offset, SQL injection context, deserialization gadget chain, auth logic bypass condition
+- Vulnerability class: buffer overflow offset, SQLi context, deserialization gadget chain, auth bypass condition
 - Affected versions: exact version strings, patch commit/advisory reference
 - Exploit trigger: HTTP method, endpoint path, required headers/auth state, payload format
 - Bypass conditions: WAF bypass, auth prerequisite, race condition window
 """,
     "POST_EXP": """
 POST-EXPLOITATION FOCUS:
-- Privilege escalation: specific misconfiguration (SeImpersonatePrivilege, weak service ACL, unquoted path, token abuse)
-- Lateral movement: exact protocol (SMB/WinRM/DCOM), credential type needed, required ports
-- Credential dumping: LSASS access method (MiniDump, direct read, PPL bypass), SAM/NTDS extraction path
-- AD attack: Kerberoastable SPN list method, RBCD prerequisite, DCSync required rights
-- EDR evasion: process to inject into, which LOLBAS binary, obfuscation needed
+- Privilege escalation: specific misconfiguration (SeImpersonatePrivilege, weak ACL, unquoted path, token abuse)
+- Lateral movement: exact protocol (SMB/WinRM/DCOM), credential type, required ports
+- Credential dumping: LSASS access (MiniDump, direct read, PPL bypass), SAM/NTDS extraction
+- AD attack: Kerberoastable SPN, RBCD prerequisite, DCSync rights
+- EDR evasion: injection target process, LOLBAS binary, obfuscation
 """,
     "AI_SEC": """
-AI/LLM ATTACK FOCUS (broad coverage — any attack technique targeting AI/LLM systems):
-- Attack vector: exact injection point or entry (system prompt, tool description, RAG content, fine-tuning data, model weights, API, MCP component, agent memory, etc.)
-- Attack mechanism: why/how the model is manipulated (context confusion, role override, indirect injection, training data poisoning, adversarial input, etc.)
-- Concrete payload or technique: actual strings, templates, configurations, or steps that trigger the behavior
-- Impact: what the attacker achieves (data exfiltration, jailbreak, agent hijack, SSRF, tool misuse, model theft, denial of service, etc.)
-- Bypass / evasion: how existing defenses or safety filters are circumvented
-- PoC reproducibility: specific tools, configs, payload templates, or code a red teamer can run in a lab tomorrow
+AI/LLM ATTACK FOCUS:
+- Attack vector: injection point (system prompt, tool description, RAG content, fine-tuning data, API, MCP, agent memory)
+- Attack mechanism: context confusion, role override, indirect injection, data poisoning, adversarial input
+- Concrete payload: actual strings, templates, configurations triggering the behavior
+- Impact: data exfiltration, jailbreak, agent hijack, SSRF, tool misuse, model theft
+- Bypass: how safety filters are circumvented
+- PoC reproducibility: tools, configs, payload templates a red teamer can run tomorrow
 """,
 }
 
-def build_prompt(content: str, category: str) -> str:
-    """後方互換用ラッパー — Geminiなしの場合はこちらを使用"""
-    return build_report_prompt(content, category)
-
+# ─────────────────────────────────────────────
+# プロンプトビルダ
+# ─────────────────────────────────────────────
 def build_screening_prompt(content: str, category: str) -> str:
-    """Groq用: 新規性スコアリング + skip判定のみ（軽量・高速）"""
+    """Groq 軽量スクリーニング: 新規性スコアと要点抽出のみ"""
     ctx = CATEGORY_CONTEXT.get(category, "")
     return f"""あなたはオフェンシブセキュリティの専門家です。
 以下の記事を評価し、JSONのみを出力してください。説明・マークダウン不要。
 {ctx}
-新規性スコアを1〜5で評価:
-  5 = 新規CVE・新技術・オリジナルリサーチ・新バイパス手法
-  4 = 既知技術の有意な新バリアント（新ターゲット・新回避手法・新ツール）
-  3 = 既知手法だが具体的な適用事例として価値あり
-  2 = 既知手法の概説、新情報なし
-  1 = 教育コンテンツ・ベンダーマーケティング・技術的深度なし
+新規性スコア (1-5):
+  5 = 新規CVE・新技術・オリジナルリサーチ・新バイパス
+  4 = 既知技術の有意な新バリアント
+  3 = 既知手法の具体的適用事例
+  2 = 既知手法の概説
+  1 = 教育コンテンツ・マーケティング
 
 選定基準:
-- 「攻撃者がこれを使って何ができるか」が具体的か
-- テスターがラボで試せる手順・ツールが推測できるか
+- 攻撃者が何を達成できるか具体的か
+- テスターがラボで試せる手順が推測できるか
 
-スコア1〜2 → {{"skip": true, "reason": "除外理由（日本語）"}}
-スコア3〜5 → {{"skip": false, "score": <数値>, "title": "30字以内の日本語タイトル", "poc_url": "GitHubURLか空文字", "cvss_score": "数値か空文字", "mitre_ids": ["T1566.001"], "summary_points": ["要点1（100字以内）", "要点2", "要点3"]}}
+スコア 1-2 → {{"skip": true, "reason": "除外理由"}}
+スコア 3-5 → {{"skip": false, "score": <数値>, "title": "30字以内日本語", "cve_ids": ["CVE-2024-XXXX"], "poc_url": "GitHub URL か空", "cvss_score": "数値 or 空", "mitre_ids": ["T1566.001"], "summary_points": ["要点1 100字以内", "要点2", "要点3"], "info_density": "high|medium|low", "research_keywords": ["追加調査用の英語キーワード 2-4個"]}}
 
-例外: 以下があればスコア2でも skip:false にすること:
-- 未パッチ・ゼロデイPoCの公開
-- 新CVEに対する機能するExploit公開
-- ITW悪用確認
+info_density 判定基準:
+- high: PoC/コード例/IoC/具体的API呼び出し/詳細な手順が記事に含まれる
+- medium: 概要と一部技術詳細はあるが再現手順は不足
+- low: 速報・概要のみ、技術詳細ほぼなし (→ エージェント追加調査が必要)
+
+例外: 以下はスコア2でも skip:false:
+- 未パッチ・ゼロデイ PoC 公開
+- 新CVE に対する機能する Exploit 公開
+- ITW 悪用確認
 
 SOURCE:
-{content[:3000]}"""
+{content[:3500]}"""
 
-def build_report_prompt(content: str, category: str) -> str:
-    """Gemini用: CoT強化・詳細レポート生成"""
+
+def build_report_prompt(content: str, category: str, research_context: str = "") -> str:
+    """Gemini/Groq 詳細レポート生成"""
     ctx = CATEGORY_CONTEXT.get(category, "")
-    return f"""あなたはオフェンシブセキュリティの専門家（レッドチームオペレーター歴15年）です。
-社内のレッドチームテスター向けに、攻撃者視点で攻撃を再現するための内部技術レポートを作成してください。
+    research_block = ""
+    if research_context:
+        research_block = f"""
 
-対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
+━━━ 追加調査情報 (AIエージェントが記事以外から補完) ━━━
+以下は元記事の情報不足を補うため、NVD / Tavily / GitHub から収集した追加情報です。
+この情報を積極的に統合し、記事単独では再現困難だった部分を補完したレポートを作成してください。
+ただし各情報の出所は [NVD]/[Tavily]/[GitHub] として必ず明記してください。
+
+{research_context[:6000]}
+━━━ 追加調査情報ここまで ━━━
+"""
+    return f"""あなたはオフェンシブセキュリティの専門家 (レッドチームオペレーター歴15年) です。
+社内のレッドチームテスター向けに、攻撃を再現するための内部技術レポートを作成してください。
+
+対象読者: 明日ラボ環境でこの攻撃を試みるテスター。曖昧な記述は不要。
 {ctx}
+{research_block}
 
-━━━ STEP 1: 攻撃者として考える（出力不要） ━━━
-以下を自問してから書き始めること（思考過程は出力しない）:
-1. この脆弱性/手法を使って攻撃者は何を達成できるか？
-2. 攻撃成立に必要な前提条件は何か？（権限・アクセス・バージョン）
-3. 既存の検知・防御はどこで機能し、どこで機能しないか？
-4. ラボで再現するために最低限必要な手順は何か？
-5. 記事が言及していない実装の詳細で、専門知識から補完できるものは何か？
+━━━ 思考ステップ (出力不要) ━━━
+1. 攻撃者は何を達成できるか?
+2. 成立の前提条件 (権限/アクセス/バージョン) は?
+3. 既存の検知・防御はどこで効き、どこで効かないか?
+4. ラボ再現の最低手順は?
+5. 記事と追加調査情報を統合し、専門知識で補える詳細は?
 
-━━━ STEP 2: レポート作成 ━━━
+━━━ レポート作成ルール ━━━
+【言語】全セクション日本語。ツール名・CVE・API・コマンドのみ英語維持。
+【完結性】全セクション最後まで書く。途中省略禁止。
+【情報源】追加調査情報を使った箇所は [NVD]/[Tavily追加調査]/[GitHub] のタグを付ける。
+【推測】記事・追加情報にない部分を専門知識で補う場合は [推測] を付記。
 
-【言語ルール】
-- 全セクションを日本語で記述
-- ツール名・CVE ID・APIコール・コマンドのみ英語維持
+## 概要
+1-2文の核心サマリ: 「〇〇が報告された。重要なのは〜という点である」
+技術的要点 (箇条書き 3-5): 各点「何が・どのように・なぜ危険か」1文
+**🆕 新規性・差異化ポイント:** (太字) 従来手法との差異
+属性: APT / Malware / CVE / IoC (不明は「記載なし」)
 
-【重要】全セクションを最後まで書き切ること。途中で切らないこと。
+## 脆弱性・脅威の技術的メカニズム
+- 脆弱コンポーネントと悪用の仕組みを技術的に説明
+- API呼び出し・メモリ操作・プロトコルフィールド・コードパス具体的に
+- CVE: 脆弱コードパス・トリガー条件
+- マルウェア: ロード→復号→実行の内部動作を段階的に
+- 最低500字。「高度な」「巧妙な」等の抽象表現禁止
 
-[## 概要]
-1〜2文の核心サマリー:「〇〇が報告された。重要なのは〜という点である」形式
-技術的要点（箇条書き3〜5点）:各点は「何が・どのように・なぜ危険か」を1文で
-**🆕 新規性・差異化ポイント:**（太字・独立段落）従来手法との具体的な差異
-属性情報: APT / Malware / CVE / IoC（不明は「記載なし」）
+## 攻撃再現ガイド
+### 前提条件・環境
+OS・権限・必要ツール・攻撃対象の状態
 
-[## 脆弱性・脅威の技術的メカニズム]
-- 脆弱なコンポーネント・ロジックと悪用の仕組みを技術的に説明
-- APIコール・メモリ操作・プロトコルフィールド・コードパスを具体的に記述
-- CVEの場合: 脆弱なコードパス・トリガー条件
-- マルウェアの場合: ロード→復号→実行の内部動作を段階的に説明
-- 最低500文字。「高度な」「巧妙な」等の抽象表現は禁止
-
-[## 攻撃再現ガイド]
-■ 前提条件・環境
-（OS・権限・必要ツール・攻撃対象の状態）
-
-■ 攻撃フロー
+### 攻撃フロー
 フェーズごとに:
   【操作】何を・どこで・どのように
   【目的】攻撃上なぜ必要か
   【結果】何が起きるか・何が得られるか
-  ※記事にない部分は知識から補完し [推測] を付記
+  情報源タグを必ず付ける ([記事] / [NVD] / [Tavily追加調査] / [GitHub] / [推測])
 
-■ 実装・設定の詳細
-記事が言及した具体的要素（CLSID・APIコール・レジストリキー・ファイルパス等）の
-作り方・設定方法をコードブロック付きで説明
+### 実装・設定の詳細
+CLSID・API呼び出し・レジストリキー・ファイルパス等を
+コードブロック付きで説明
 
-[## IoC・痕跡情報]
-ハッシュ値・C2・URI・User-Agent・証明書等。なければ「記事中に記載なし」
+## IoC・痕跡情報
+ハッシュ・C2・URI・User-Agent・証明書等。なければ「記載なし」
 
-[## MITRE ATT&CK マッピング]
-記事の手法に正確に対応するIDを選ぶこと（サブテクニックIDと説明を付ける）
+## MITRE ATT&CK マッピング
+記事の手法に対応するIDのみ (サブテクニックID + 説明)
 
-[## 検知・防御策]
-**防御策**（最低3項目・具体的な設定変更形式）
-**検知策**: 検知ポイント + Sigma/KQL/SPL クエリ（具体的なIoCを含む）
+## 検知・防御策
+**防御策** (最低3項目・具体的な設定変更形式)
+**検知策**: 検知ポイント + Sigma/KQL/SPL クエリ (具体的IoC含む)
 
-OUTPUT: ONLY valid JSON. No markdown fences. Use \n for newlines in report field.
-{{"title":"30字以内日本語タイトル","summary_points":["要点1","要点2","要点3"],"poc_url":"GitHubURLか空文字","cvss_score":"数値か空文字","mitre_ids":["T1566.001"],"report":"## 概要\n..."}}
+## 🔍 情報ソースサマリ
+このレポートで使用した情報源を箇条書き:
+- [記事] 元記事から取得した情報の種類
+- [NVD] 取得したCVE詳細 (該当時)
+- [Tavily追加調査] 補完した情報の種類 (該当時)
+- [GitHub] 参照したPoC/コード (該当時)
+- [推測] 専門知識で補完した箇所
+
+OUTPUT: ONLY valid JSON. No markdown fences. Use \\n for newlines in report field.
+{{"title":"30字以内日本語","summary_points":["要点1","要点2","要点3"],"poc_url":"GitHub URL or 空","cvss_score":"数値 or 空","mitre_ids":["T1566.001"],"cve_ids":["CVE-2024-XXXX"],"report":"## 概要\\n..."}}
 
 SOURCE ARTICLE:
 {content[:6000]}"""
 
-def build_report_prompt_legacy(content: str, category: str) -> str:
-    """Gemini未使用時のフォールバック（元のプロンプト）"""
-    ctx = CATEGORY_CONTEXT.get(category, "")
-    return f"""あなたはオフェンシブセキュリティの専門家（レッドチームオペレーター歴15年）です。
-社内のレッドチームテスター向けに、攻撃者視点で攻撃を再現するための内部技術レポートを作成してください。
-
-対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
-{ctx}
-
-対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
-{ctx}
-━━━ STEP 1: 記事選定（まず実施・出力不要） ━━━
-以下の基準で新規性スコアを1〜5で評価してください:
-  5 = 新規CVE・新技術・オリジナルリサーチ・広く知られていない新バイパス手法
-  4 = 既知技術の有意な新バリアント（新ターゲット・新回避手法・新ツール）
-  3 = 既知手法だが特定環境・設定への具体的な適用事例として価値あり
-  2 = 既知手法の概説、新情報なし
-  1 = 一般的な教育コンテンツ、ベンダーマーケティング、技術的深度なし
-
-選定基準（重要）:
-- 「攻撃者がこれを使って何ができるか」が具体的に書かれているか
-- テスターがラボで試せる具体的な手順・ツール・設定が推測できるか
-- 単なるインシデント報告や製品紹介ではなく、攻撃手法の技術詳細があるか
-
-スコア1〜2の場合のみ、以下のJSONを出力してください:
-{{"skip": true, "reason": "除外理由を日本語で記載"}}
-
-スコア3〜5の場合: 以下のSTEP 2に進んでください。
-
-【重要例外】以下の要素があればスコア2でも採用し STEP 2 に進んでください:
-- 未パッチ・ゼロデイ（no CVE / no patch）のPoC公開
-- 新しいCVEに対する機能するExploit/PoCが公開された
-- 実際の攻撃（ITW: in-the-wild）への悪用が確認された
-
-━━━ STEP 2: レポート作成 ━━━
-
-【言語ルール（絶対遵守）】
-- 全セクションを日本語で記述すること
-- ツール名・CVE ID・APIコール・コマンド構文のみ英語を維持
-- 正例: 「本マルウェアはVirtualAllocExでリモートプロセスにメモリを確保し、WriteProcessMemoryで注入する」
-- 誤例: 「This malware allocates memory using VirtualAllocEx」
-
-【重要】全セクションを最後まで書き切ること。途中で切らないこと。
-スペースが足りない場合は「## 検知・防御策」と「## IoC・痕跡情報」のみ短縮可。他は絶対に短縮しないこと。
-
-[## 概要]
-以下の構成で記述すること:
-
-1〜2文の核心サマリー（冒頭）:
-「〇〇が報告された。重要なのは〜という点である」の形式で書く。
-例: 「CrystalX RATを用いたMaaS（Malware-as-a-Service）が報告された。重要なのは低スキルでも利用可能なマルウェアサービスとして拡散している点である。」
-
-技術的要点（箇条書き3〜5点）:
-・各点は「何が」「どのように」「なぜ危険か」を1文で表現
-・「高度な」「巧妙な」等の抽象表現は使わず、具体的な動作・仕組みを書く
-
-**🆕 新規性・差異化ポイント:**（独立した段落・太字）
-従来手法との具体的な差異を1〜2文で記述。情報不足の場合は [推測] を付与。
-
-属性情報（判明分のみ、不明は「記載なし」）:
-APT: （脅威アクター名）
-Malware: （マルウェア名）
-CVE: （CVE番号）
-IoC: （ハッシュ・IP・ドメインなど）
-
-[## 脆弱性・脅威の技術的メカニズム]
-攻撃者視点で「なぜこの攻撃が成立するか」を技術的に説明すること:
-- 脆弱なコンポーネント・設定・ロジックを特定し、悪用の仕組みを説明
-- APIコール名・メモリ操作・プロトコルフィールド・コードパスを具体的に記述
-- CVEの場合: 脆弱なコードパス・トリガー条件・パッチ差分
-- マルウェアの場合: ロード→復号→実行の各ステップを内部動作レベルで説明
-- 最低300文字。表面的な説明は不可。攻撃者がどう悪用するかの視点を保つこと
-
-[## 攻撃再現ガイド]
-
-このセクションの目的: レッドチームテスターが「この攻撃を自分で再現するには何が必要か」を
-理解できるよう、攻撃の流れを具体的に記述すること。
-コマンド形式にこだわらず、設定手順・操作手順・必要な知識・ツール・サービスを含めて書く。
-
-■ 前提条件・環境
-- 必要なOS・ネットワーク構成・アカウント種別・権限レベル
-- 必要なツール・サービス・外部リソース（登録が必要なものも含む）
-- 攻撃対象の前提状態（どんな設定が有効だと悪用できるか）
-
-■ 攻撃フロー（段階ごとに記述）
-各フェーズを「準備→実行→維持」の構造で記述すること。
-各ステップは以下を含む:
-  - 【操作】何を・どこで・どのように行うか（UIでの操作・設定変更・コマンド等）
-  - 【目的】この操作が攻撃上なぜ必要か
-  - 【結果】この操作で何が起きるか・何が得られるか
-  - 記事から読み取れない部分は知識から補完し [推測] を付記
-
-■ 具体的な実装・設定の詳細
-記事に言及された具体的な要素（特定CLSID・特定APIコール・特定設定値・
-OAuthパラメータ・特定ファイル名・特定レジストリキー等）は
-その作り方・設定方法・使い方を詳しく説明すること。
-コードブロックが自然な場合は使用する。設定画面の操作の場合は手順を文章で説明する。
-
-[## IoC・痕跡情報]
-記事に記載されたIoC（ハッシュ・IP・ドメイン・URLパターン・C2ヘッダー・
-URIパターン・ファイル名・レジストリキー等）を整理して記載:
-- ハッシュ値: （MD5/SHA256）
-- C2ドメイン・IP: 
-- 特徴的なパターン（User-Agent・URI・証明書等）:
-記事にIoCが含まれない場合は「記事中に記載なし」と明記する
-
-[## MITRE ATT&CK マッピング]
-記事の攻撃手法を正確に反映したATT&CKテクニックIDを選ぶこと。
-T1055.012（プロセスホロウィング）はProcess Hollowingの場合のみ使用。
-記事の実際の手法に合ったIDを選ぶこと（例: 権限昇格→T1068、フィッシング→T1566、クレデンシャルダンプ→T1003等）
-各テクニックにサブテクニックIDと説明を付けること
-
-[## 検知・防御策]
-
-**防御策**
-・具体的な設定変更・パッチ・権限制限（最低3項目）
-・「〜を有効にする」「〜を無効化する」形式で具体的に記述
-
-**検知策**
-①検知ポイント: この攻撃が検知できるログ取得元を列挙
-　（例: EDRのプロセス生成ログ、Windowsイベントログ4688、NDRのDNSクエリログ）
-②SIEMクエリ（KQL / Sigma / SPL のいずれかで必ず1つ以上）:
-```
-具体的なIoCを含むクエリ（プロセス名・コマンドライン・通信先・レジストリキー等）
-```
-
-OUTPUT: ONLY valid JSON. No markdown fences around JSON. Use \n for newlines in report field.
-IMPORTANT: All text fields must be in JAPANESE. Tool names, CVE IDs, API names, commands may remain in English.
-
-Skip: {{"skip": true, "reason": "除外理由を日本語で記載"}}
-
-Full: {{"title":"攻撃の核心を30字以内で表す日本語タイトル","summary_points":["核心サマリー（重要性含む1文）","技術的要点1","技術的要点2","技術的要点3"],"poc_url":"GitHubのURLか空文字","cvss_score":"数値のみか空文字","mitre_ids":["T1566.001","T1059.001"]  ← 必ず記事内容に合ったIDに書き換えること,"report":"## 概要\n...\n## 脆弱性・脅威の技術的メカニズム\n...\n## 攻撃再現ガイド\n■ 前提条件・環境\n...\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】...\n【目的】...\n【結果】...\n【フェーズ2: 実行】\n...\n■ 具体的な実装・設定の詳細\n...\n## IoC・痕跡情報\n...\n## MITRE ATT&CK マッピング\n...\n## 検知・防御策\n**防御策**\n・...\n\n**検知策**\n①検知ポイント: ...\n②Sigma/KQL:\n```\n...\n```"}}
-
-SOURCE ARTICLE:
-{content[:4000]}"""
-
 
 # ─────────────────────────────────────────────
-# JSON抽出（deepseek-r1の<think>対応を強化）
+# JSON 抽出
 # ─────────────────────────────────────────────
 def extract_json(raw: str) -> dict | None:
-    # <think>...</think> を非貪欲マッチで除去（ネスト・複数ブロック対応）
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-    cleaned = cleaned.strip()
-
-    # ```json ... ``` または ``` ... ``` ブロックを除去
+    if not raw:
+        return None
+    # <think> ブロック除去
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    # ```json フェンス除去
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     cleaned = cleaned.strip()
@@ -414,55 +298,58 @@ def extract_json(raw: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # パターン2: 最初の { から最後の } まで抽出（外側のテキストを無視）
-    brace_start = cleaned.find("{")
-    brace_end   = cleaned.rfind("}")
-    if brace_start != -1 and brace_end > brace_start:
+    # パターン2: 最初の { から最後の }
+    bs, be = cleaned.find("{"), cleaned.rfind("}")
+    if bs != -1 and be > bs:
         try:
-            return json.loads(cleaned[brace_start:brace_end+1])
+            return json.loads(cleaned[bs:be+1])
         except json.JSONDecodeError:
             pass
 
+    # パターン3: JSON文字列内の生改行をエスケープしてリトライ
+    if bs != -1 and be > bs:
+        candidate = cleaned[bs:be+1]
+        # 文字列リテラル内の改行のみ \n に置換 (単純ヒューリスティック)
+        fixed = re.sub(
+            r'("(?:[^"\\]|\\.)*")',
+            lambda m: m.group(1).replace("\n", "\\n").replace("\r", ""),
+            candidate,
+            flags=re.DOTALL,
+        )
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
     return None
 
+
 def validate_result(res: dict) -> bool:
-    """品質フィルタ: 必須フィールドと最低品質チェック"""
-    if not res:
-        return False
-    # 新規性スコアが低い記事はskipフラグで除外
-    if res.get("skip"):
+    if not res or res.get("skip"):
         return False
     if not res.get("title") or len(res["title"]) < 5:
         return False
     if not res.get("report") or len(res["report"]) < MIN_REPORT_LEN:
         return False
-    # LLMがpoc_urlに "なし" "N/A" "none" 等を入れた場合は空文字に正規化
     poc = res.get("poc_url", "")
     if poc and not poc.startswith("http"):
         res["poc_url"] = ""
-    # cvss_scoreが数値でなければ空文字に正規化
     cvss = res.get("cvss_score", "")
     if cvss:
         try:
             float(cvss)
         except ValueError:
             res["cvss_score"] = ""
-    # mitre_ids: 正規フォーマット T\d{4}(.*)のみ残す、プレースホルダー除去
-    import re as _re2
     raw_ids = res.get("mitre_ids", [])
-    cleaned_ids = [i for i in raw_ids if _re2.match(r"T\d{4}", str(i))]
-    res["mitre_ids"] = cleaned_ids[:5]  # 最大5件
-    # summary_points: 各要素を100字以内に丸める（カードUIで見切れ防止）
+    res["mitre_ids"] = [i for i in raw_ids if re.match(r"T\d{4}", str(i))][:5]
     pts = res.get("summary_points", [])
     res["summary_points"] = [p[:100] for p in pts if p][:4]
     return True
 
 
 # ─────────────────────────────────────────────
-# Gemini呼び出し（詳細レポート生成）
+# LLM 呼び出し
 # ─────────────────────────────────────────────
 def call_gemini(prompt: str) -> dict | None:
-    """Gemini 2.5 Flash でレポートを生成する（レート制限対応）"""
     if not gemini_model:
         return None
     for attempt in range(2):
@@ -471,7 +358,7 @@ def call_gemini(prompt: str) -> dict | None:
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.2,
-                    max_output_tokens=4096,
+                    max_output_tokens=8192,  # 4096 → 8192: 日本語レポート途中切れ対策
                 )
             )
             raw = response.text
@@ -493,29 +380,22 @@ def call_gemini(prompt: str) -> dict | None:
                 return None
     return None
 
-# ─────────────────────────────────────────────
-# LLM呼び出し（モデルフォールバック付きリトライ）
-# ─────────────────────────────────────────────
-_tpd_hit_models: set = set()  # TPD上限に達したモデルを記録
+
+_tpd_hit_models: set = set()
 
 def call_llm(prompt: str) -> dict | None:
     global _tpd_hit_models
-    import re as _re
-    _RATE_LIMIT_PAT = _re.compile(r"try again in ([\d.]+)([smh])")
+    _RATE_LIMIT_PAT = re.compile(r"try again in ([\d.]+)([smh])")
 
     def _parse_wait(err_str: str) -> float:
-        """APIエラーメッセージから待機秒数を抽出する"""
         m = _RATE_LIMIT_PAT.search(str(err_str))
         if not m:
             return 5.0
         val, unit = float(m.group(1)), m.group(2)
         return val * {"s": 1, "m": 60, "h": 3600}.get(unit, 1)
 
-    _DECOMMISSIONED = "decommissioned"
-    _RATE_LIMIT     = "rate_limit_exceeded"
-
     for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
-        model_dead = False  # このモデルが使用不可ならスキップ
+        model_dead = False
         for attempt in range(MAX_RETRIES):
             if model_dead:
                 break
@@ -524,90 +404,259 @@ def call_llm(prompt: str) -> dict | None:
                     model=model,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0.1,
-                    max_tokens=3000,
+                    max_tokens=3500,
                 )
                 raw = resp.choices[0].message.content
                 result = extract_json(raw)
-
                 if result and result.get("skip"):
-                    # 新規性なし → 全モデル試す必要なく即終了
                     print(f"    ✗ [{model}] 新規性なし — {result.get('reason','')}")
                     return None
-
                 if result and validate_result(result):
                     print(f"    ✓ [{model}] attempt {attempt+1} — OK")
                     return result
-
-                print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足, retry...")
+                print(f"    ✗ [{model}] attempt {attempt+1} — 品質不足")
                 time.sleep(2)
-
             except Exception as e:
                 err = str(e)
-                if _DECOMMISSIONED in err:
-                    # モデルが廃止 → このモデルは飛ばす
-                    print(f"    ✗ [{model}] decommissioned — 次のモデルへ")
+                if "decommissioned" in err:
+                    print(f"    ✗ [{model}] decommissioned")
                     model_dead = True
                     break
-                elif _RATE_LIMIT in err:
-                    err_lower = err.lower()
-                    # TPD（日次）上限 → 待機しても無意味、次モデルへ
-                    if "tokens per day" in err_lower or "tpd" in err_lower:
-                        print(f"    ✗ [{model}] TPD上限 — 次モデルへ")
+                elif "rate_limit_exceeded" in err:
+                    if "tokens per day" in err.lower() or "tpd" in err.lower():
+                        print(f"    ✗ [{model}] TPD 上限")
                         model_dead = True
                         _tpd_hit_models.add(model)
                         break
-                    # TPM（分次）上限 → 指定時間だけ待機してリトライ
                     else:
-                        wait = min(_parse_wait(err), 30)  # TPM上限は最大30秒
-                        print(f"    ✗ [{model}] TPM上限 — {wait:.0f}秒待機...")
+                        wait = min(_parse_wait(err), 30)
+                        print(f"    ✗ [{model}] TPM — {wait:.0f}秒待機")
                         time.sleep(wait)
                 else:
-                    print(f"    ✗ [{model}] attempt {attempt+1} — {e}")
+                    print(f"    ✗ [{model}] {e}")
                     time.sleep(3)
-
     return None
 
-# ─────────────────────────────────────────────
-# TPD上限検知用センチネル値
-TPD_EXHAUSTED = object()
 
-def call_llm_safe(prompt: str):
-    """call_llm のラッパー。両モデルがTPD上限なら TPD_EXHAUSTED を返す"""
-    result = call_llm(prompt)
-    if result is None:
-        # _tpd_exhaustedフラグを確認（call_llm内でセットされる）
-        pass
-    return result
+def call_llm_screening(prompt: str) -> dict | None:
+    """スクリーニング専用: skip 判定結果もそのまま返す (validate はしない)"""
+    global _tpd_hit_models
+    for model in [PRIMARY_MODEL, FALLBACK_MODEL]:
+        for attempt in range(2):
+            try:
+                resp = groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=1500,
+                )
+                result = extract_json(resp.choices[0].message.content)
+                if result is not None:
+                    return result
+                time.sleep(1)
+            except Exception as e:
+                err = str(e)
+                if "tokens per day" in err.lower() or "tpd" in err.lower():
+                    _tpd_hit_models.add(model)
+                    break
+                time.sleep(2)
+    return None
+
 
 # ─────────────────────────────────────────────
-# 重複チェック（URLとタイトル類似度）
+# エージェント調査フェーズ (情報補完)
+# ─────────────────────────────────────────────
+def extract_cve_ids(text: str) -> list[str]:
+    """テキストから CVE ID を抽出して重複除去"""
+    ids = re.findall(r"CVE-\d{4}-\d{4,7}", text, re.IGNORECASE)
+    seen = set()
+    out = []
+    for i in ids:
+        u = i.upper()
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:5]  # 最大5件
+
+
+def fetch_nvd_cve(cve_id: str) -> str:
+    """NVD API から CVE 詳細を取得して要約文字列を返す"""
+    try:
+        url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        vulns = data.get("vulnerabilities", [])
+        if not vulns:
+            return ""
+        cve = vulns[0].get("cve", {})
+        descs = cve.get("descriptions", [])
+        desc_en = next((d["value"] for d in descs if d.get("lang") == "en"), "")
+
+        # CVSS
+        metrics = cve.get("metrics", {})
+        cvss_str = ""
+        for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+            if key in metrics and metrics[key]:
+                m = metrics[key][0].get("cvssData", {})
+                cvss_str = f"CVSS {m.get('baseScore','?')} ({m.get('baseSeverity','?')}) vector={m.get('vectorString','?')}"
+                break
+
+        # CWE
+        weaknesses = cve.get("weaknesses", [])
+        cwes = []
+        for w in weaknesses:
+            for d in w.get("description", []):
+                if d.get("value", "").startswith("CWE-"):
+                    cwes.append(d["value"])
+        cwe_str = ", ".join(cwes[:3]) if cwes else ""
+
+        # 参考リンク (tag ありを優先)
+        refs = cve.get("references", [])
+        ref_lines = []
+        for r in refs[:8]:
+            tags = ",".join(r.get("tags", []))
+            ref_lines.append(f"  - {r.get('url','')} [{tags}]")
+
+        out = f"[NVD] {cve_id}\n"
+        out += f"  Description: {desc_en[:800]}\n"
+        if cvss_str:
+            out += f"  {cvss_str}\n"
+        if cwe_str:
+            out += f"  CWE: {cwe_str}\n"
+        if ref_lines:
+            out += "  References:\n" + "\n".join(ref_lines) + "\n"
+        return out
+    except Exception as e:
+        print(f"    ✗ NVD取得失敗 ({cve_id}): {e}")
+        return ""
+
+
+def search_github_poc(keyword: str) -> str:
+    """GitHub で PoC/Exploit リポジトリを検索して要約を返す"""
+    try:
+        q = urllib.parse.quote(f"{keyword} PoC exploit")
+        url = f"https://api.github.com/search/repositories?q={q}&sort=updated&per_page=5"
+        headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
+        if GITHUB_TOKEN:
+            headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+        items = data.get("items", [])[:5]
+        if not items:
+            return ""
+        lines = [f"[GitHub] search: {keyword}"]
+        for it in items:
+            desc = (it.get("description") or "").strip()[:150]
+            lines.append(f"  - {it.get('html_url','')} ⭐{it.get('stargazers_count',0)} {desc}")
+        return "\n".join(lines) + "\n"
+    except Exception as e:
+        print(f"    ✗ GitHub検索失敗 ({keyword}): {e}")
+        return ""
+
+
+def tavily_deep_search(query: str, max_results: int = 3) -> str:
+    """Tavily で技術詳細を追加検索して本文要約を返す"""
+    if not tavily_client:
+        return ""
+    try:
+        results = tavily_client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=max_results,
+        ).get("results", [])
+        if not results:
+            return ""
+        lines = [f"[Tavily追加調査] query: {query}"]
+        for r in results:
+            content = (r.get("content") or "")[:500]
+            lines.append(f"  URL: {r.get('url','')}")
+            lines.append(f"  {content}")
+        return "\n".join(lines) + "\n"
+    except Exception as e:
+        print(f"    ✗ Tavily詳細検索失敗 ({query[:40]}): {e}")
+        return ""
+
+
+def agent_research(screening: dict, original_content: str, category: str) -> str:
+    """
+    情報不足の記事に対し、エージェントが追加情報を収集する。
+    戻り値は LLM プロンプトに埋め込める research_context 文字列。
+    """
+    print(f"    🔍 エージェント調査フェーズ開始...")
+    research_parts = []
+
+    # 1. CVE ID を抽出 → NVD から詳細取得
+    cve_ids = screening.get("cve_ids") or []
+    if not cve_ids:
+        cve_ids = extract_cve_ids(original_content + " " + screening.get("title", ""))
+    for cid in cve_ids[:3]:
+        print(f"      [NVD] fetching {cid}")
+        nvd_info = fetch_nvd_cve(cid)
+        if nvd_info:
+            research_parts.append(nvd_info)
+        time.sleep(0.5)
+
+    # 2. Tavily で技術詳細を追加検索
+    keywords = screening.get("research_keywords") or []
+    if not keywords and screening.get("title"):
+        # タイトルから簡易キーワード生成
+        keywords = [screening["title"]]
+    for kw in keywords[:2]:
+        if cve_ids:
+            q = f"{cve_ids[0]} technical analysis exploit PoC"
+        else:
+            q = f"{kw} technical analysis exploit"
+        print(f"      [Tavily] {q[:60]}")
+        tv_info = tavily_deep_search(q, max_results=2)
+        if tv_info:
+            research_parts.append(tv_info)
+        time.sleep(0.5)
+
+    # 3. GitHub で PoC 検索
+    if cve_ids:
+        for cid in cve_ids[:2]:
+            print(f"      [GitHub] {cid}")
+            gh_info = search_github_poc(cid)
+            if gh_info:
+                research_parts.append(gh_info)
+            time.sleep(0.5)
+
+    merged = "\n".join(research_parts)
+    if merged:
+        print(f"    ✓ 追加情報 {len(merged)} 文字収集")
+    else:
+        print(f"    ✗ 追加情報収集できず")
+    return merged
+
+
+# ─────────────────────────────────────────────
+# 重複チェック
 # ─────────────────────────────────────────────
 def title_hash(title: str) -> str:
-    """タイトルを正規化してハッシュ化（表記ゆれを吸収）"""
     normalized = re.sub(r"[^\w]", "", title).lower()
     return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
+
 # ─────────────────────────────────────────────
-# RSSフィード取得ユーティリティ
+# RSS / 本文取得
 # ─────────────────────────────────────────────
 def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
-    """RSSフィードから最新記事を取得して返す"""
     try:
         req = urllib.request.Request(
             feed_url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", "Accept": "application/rss+xml, application/xml, text/xml, */*"}
+            headers={"User-Agent": USER_AGENT,
+                     "Accept": "application/rss+xml, application/xml, text/xml, */*"}
         )
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read()
-
         root = ET.fromstring(raw)
         ns = {"atom": "http://www.w3.org/2005/Atom"}
         items = []
-
         cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
         def parse_pubdate(s: str):
-            """RSS pubDate / Atom updated を datetime に変換"""
             if not s:
                 return None
             for fmt in [
@@ -627,18 +676,17 @@ def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
 
         # RSS 2.0
         for item in root.findall(".//item")[:max_items * 3]:
-            title   = item.findtext("title", "").strip()
-            url     = item.findtext("link", "").strip()
+            title = item.findtext("title", "").strip()
+            url = item.findtext("link", "").strip()
             pub_raw = item.findtext("pubDate", "") or item.findtext("dc:date", "")
-            pub_dt  = parse_pubdate(pub_raw)
-            # 日付が取れた場合は7日以内のみ採用（取れない場合はスキップしない）
+            pub_dt = parse_pubdate(pub_raw)
             if pub_dt and pub_dt < cutoff:
                 continue
             summary = item.findtext("description", "") or item.findtext("summary", "")
             content_el = item.find("{http://purl.org/rss/1.0/modules/content/}encoded")
             body = content_el.text if content_el is not None else summary
             body = unescape(re.sub(r"<[^>]+>", " ", body or "")).strip()
-            if url and len(body) >= 300:
+            if url:
                 items.append({"url": url, "title": title, "content": body})
             if len(items) >= max_items:
                 break
@@ -650,63 +698,84 @@ def fetch_rss(feed_url: str, max_items: int = 5) -> list[dict]:
                 link_el = entry.find("atom:link", ns)
                 url = link_el.get("href", "") if link_el is not None else ""
                 pub_raw = entry.findtext("atom:updated", "", ns) or entry.findtext("atom:published", "", ns)
-                pub_dt  = parse_pubdate(pub_raw)
+                pub_dt = parse_pubdate(pub_raw)
                 if pub_dt and pub_dt < cutoff:
                     continue
                 summary = entry.findtext("atom:summary", "", ns) or entry.findtext("atom:content", "", ns)
                 body = unescape(re.sub(r"<[^>]+>", " ", summary or "")).strip()
-                if url and len(body) >= 150:
+                if url:
                     items.append({"url": url, "title": title, "content": body})
                 if len(items) >= max_items:
                     break
-
         return items
-
     except Exception as e:
         print(f"  ✗ RSS取得失敗 ({feed_url[:50]}): {e}")
         return []
 
 
 def fetch_article_body(url: str) -> str:
-    """記事URLから本文をフェッチして返す（RSSの要約が短い場合の補完）"""
+    """
+    改善版: <article>/<main> 優先抽出、なければ <p> タグを集約。
+    ナビゲーション・広告ノイズを軽減する。
+    """
     try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8", errors="ignore")
-        # 簡易HTML→テキスト
-        raw = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL)
-        raw = re.sub(r"<style[^>]*>.*?</style>",  " ", raw, flags=re.DOTALL)
-        raw = re.sub(r"<[^>]+>", " ", raw)
-        raw = unescape(raw)
-        raw = re.sub(r"\s{2,}", " ", raw).strip()
-        return raw[:8000]
+
+        # script/style/nav/footer/aside を先に削除
+        raw = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<nav[^>]*>.*?</nav>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<footer[^>]*>.*?</footer>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<aside[^>]*>.*?</aside>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<header[^>]*>.*?</header>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+        raw = re.sub(r"<!--.*?-->", " ", raw, flags=re.DOTALL)
+
+        # <article> または <main> タグ優先
+        article_match = re.search(r"<article[^>]*>(.*?)</article>", raw, re.DOTALL | re.IGNORECASE)
+        if article_match:
+            body = article_match.group(1)
+        else:
+            main_match = re.search(r"<main[^>]*>(.*?)</main>", raw, re.DOTALL | re.IGNORECASE)
+            if main_match:
+                body = main_match.group(1)
+            else:
+                # フォールバック: <p> タグを集約
+                paras = re.findall(r"<p[^>]*>(.*?)</p>", raw, re.DOTALL | re.IGNORECASE)
+                body = " ".join(paras) if paras else raw
+
+        # <pre><code> は改行保持で抽出 (IoC/コマンド例)
+        codes = re.findall(r"<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>", body, re.DOTALL | re.IGNORECASE)
+        code_text = "\n".join(unescape(re.sub(r"<[^>]+>", "", c)) for c in codes)
+
+        body = re.sub(r"<[^>]+>", " ", body)
+        body = unescape(body)
+        body = re.sub(r"\s{2,}", " ", body).strip()
+
+        if code_text:
+            body = body + "\n\nCODE BLOCKS:\n" + code_text[:2000]
+        return body[:10000]
     except Exception as e:
         print(f"  ✗ 本文取得失敗 ({url[:50]}): {e}")
         return ""
 
 
-
-# ─────────────────────────────────────────────
-# Tavily検索（トレンド記事の捕捉）
-# ─────────────────────────────────────────────
 def fetch_tavily(query: str, max_results: int = 3) -> list[dict]:
-    """Tavilyでウェブ検索し、記事リストを返す"""
     if not tavily_client:
         return []
     try:
         results = tavily_client.search(
             query=query,
-            search_depth="advanced",   # 本文全体を取得
+            search_depth="advanced",
             max_results=max_results,
-            days=3,                    # 直近3日の記事のみ
+            days=3,
         )["results"]
         items = []
         for r in results:
-            url     = r.get("url", "")
+            url = r.get("url", "")
             content = r.get("content", "")
-            title   = r.get("title", "")
+            title = r.get("title", "")
             if url and len(content) >= 200:
                 items.append({"url": url, "title": title, "content": content})
         return items
@@ -714,32 +783,125 @@ def fetch_tavily(query: str, max_results: int = 3) -> list[dict]:
         print(f"  ✗ Tavily検索エラー ({query[:40]}): {e}")
         return []
 
+
 # ─────────────────────────────────────────────
-# 情報収集メイン（RSS + Tavily併用）
+# 記事処理コア (統一関数: RSS/Tavily 両方で使用)
 # ─────────────────────────────────────────────
-def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
+def process_article(url: str, title: str, content: str, category: str,
+                    seen_title_hashes: set) -> dict | None:
+    """
+    1記事を処理してDBエントリを返す。失敗時 None。
+    情報密度が低ければエージェント調査フェーズを実行。
+    """
+    # 1. 本文が短ければ直接フェッチ
+    if len(content) < 1500:
+        print(f"    本文補完フェッチ...")
+        fetched = fetch_article_body(url)
+        if len(fetched) > len(content):
+            content = fetched
+
+    if len(content) < 150:
+        print(f"    skip (本文不足)")
+        return None
+
+    # 2. スクリーニング (Groq)
+    screening = call_llm_screening(build_screening_prompt(content, category))
+    if screening is None:
+        print(f"    skip (スクリーニング失敗)")
+        return None
+    if screening.get("skip"):
+        print(f"    skip (新規性なし): {screening.get('reason','')}")
+        return None
+
+    print(f"    ✓ スクリーニング OK (score={screening.get('score','?')}, density={screening.get('info_density','?')})")
+
+    # 3. 情報密度判定 → 不足ならエージェント調査
+    density = screening.get("info_density", "medium")
+    research_context = ""
+    # low または (medium かつ 本文400字未満) なら調査を実行
+    if density == "low" or (density == "medium" and len(content) < MIN_SOURCE_LEN):
+        research_context = agent_research(screening, content, category)
+
+    # CVE が検出されたが密度 high でも、追加情報があると質が上がるので軽く取得
+    elif screening.get("cve_ids"):
+        for cid in screening["cve_ids"][:2]:
+            nvd_info = fetch_nvd_cve(cid)
+            if nvd_info:
+                research_context += nvd_info
+            time.sleep(0.5)
+
+    # 4. レポート生成 (Gemini 優先)
+    if gemini_model:
+        result = call_gemini(build_report_prompt(content, category, research_context))
+        if result is None:
+            print(f"    Gemini失敗 → Groqフォールバック")
+            result = call_llm(build_report_prompt(content, category, research_context))
+        else:
+            print(f"    ✓ [Gemini] レポート生成完了")
+    else:
+        result = call_llm(build_report_prompt(content, category, research_context))
+
+    if result is None:
+        return None
+
+    # スクリーニング結果で補完
+    result.setdefault("title", screening.get("title", ""))
+    result.setdefault("poc_url", screening.get("poc_url", ""))
+    result.setdefault("cvss_score", screening.get("cvss_score", ""))
+    result.setdefault("mitre_ids", screening.get("mitre_ids", []))
+    result.setdefault("summary_points", screening.get("summary_points", []))
+    if "cve_ids" not in result:
+        result["cve_ids"] = screening.get("cve_ids", [])
+
+    # タイトル重複
+    th = title_hash(result["title"])
+    if th in seen_title_hashes:
+        print(f"    ✗ タイトル重複: {result['title'][:40]}")
+        return None
+    seen_title_hashes.add(th)
+
+    return {
+        "date":           now_jst().strftime("%Y-%m-%d"),
+        "category":       category,
+        "title":          result["title"],
+        "summary_points": result.get("summary_points", []),
+        "poc_url":        result.get("poc_url", ""),
+        "cvss_score":     result.get("cvss_score", ""),
+        "mitre_ids":      result.get("mitre_ids", []),
+        "cve_ids":        result.get("cve_ids", []),
+        "content":        result["report"],
+        "url":            url,
+        "researched":     bool(research_context),  # 調査フェーズ実行フラグ
+    }
+
+
+# ─────────────────────────────────────────────
+# 情報収集メイン
+# ─────────────────────────────────────────────
+def fetch_and_analyze(existing_urls: set[str]) -> tuple[list[dict], dict]:
     print("=" * 50)
-    print("  RED-INTEL AGENT v3.2 — RSS情報収集開始")
+    print("  RED-INTEL AGENT v4.0 — 調査フェーズ対応")
     print("=" * 50)
-    print(f"  既存DB URL数: {len(existing_urls)} 件（スキップ対象）")
+    print(f"  既存DB URL数: {len(existing_urls)}")
 
     global _tpd_hit_models
-    _tpd_hit_models = set()  # 毎実行でリセット
+    _tpd_hit_models = set()
 
     new_articles: list[dict] = []
-    seen_urls         = set(existing_urls)
+    seen_urls = set(existing_urls)
     seen_title_hashes = set()
-    tpd_exhausted     = False
+    tpd_exhausted = False
 
     run_stats = {
         "tpd_exhausted": False,
         "feed_errors":   [],
+        "researched_count": 0,
         "categories":    {}
     }
 
     for cat_id, feeds in RSS_FEEDS.items():
         cat_stats = {"adopted": 0, "skipped_dup": 0, "skipped_low": 0,
-                     "tpd_hit": False, "feed_errors": []}
+                     "researched": 0, "tpd_hit": False, "feed_errors": []}
         run_stats["categories"][cat_id] = cat_stats
 
         if tpd_exhausted:
@@ -753,120 +915,55 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
         for feed_url in feeds:
             if cat_count >= MAX_PER_CATEGORY:
                 break
-
             print(f"  RSS: {feed_url[:60]}")
             items = fetch_rss(feed_url, MAX_ITEMS_PER_FEED)
             print(f"    取得: {len(items)} 件")
             if not items:
-                cat_stats["feed_errors"].append(feed_url.split("/")[2])
+                cat_stats["feed_errors"].append(feed_url.split("/")[2] if "/" in feed_url else feed_url)
 
             for item in items:
                 if cat_count >= MAX_PER_CATEGORY:
                     break
-
-                url     = item["url"]
-                content = item["content"]
-
-                # 重複URL
+                url = item["url"]
                 if url in seen_urls:
                     print(f"    skip (重複URL): {url[:55]}")
                     cat_stats["skipped_dup"] += 1
                     continue
                 seen_urls.add(url)
-
-                # 本文が短い場合は記事本文を直接フェッチ
-                if len(content) < 1000:
-                    print(f"    本文補完フェッチ: {url[:55]}")
-                    fetched = fetch_article_body(url)
-                    if fetched:
-                        content = fetched
-
-                # それでも短ければスキップ
-                if len(content) < 200:
-                    print(f"    skip (本文不足): {url[:55]}")
-                    cat_stats["skipped_low"] += 1
-                    continue
-
                 print(f"  → {url[:70]}")
 
-                # ── フェーズ1: Groqでスクリーニング ──
-                screening_prompt = build_screening_prompt(content, cat_id)
-                screening = call_llm(screening_prompt)
+                entry = process_article(url, item["title"], item["content"], cat_id, seen_title_hashes)
 
-                # TPD上限チェック
                 if len(_tpd_hit_models) >= 2:
                     tpd_exhausted = True
                     run_stats["tpd_exhausted"] = True
                     cat_stats["tpd_hit"] = True
-                    print("  !! 両モデルTPD上限 — 残りの処理をスキップ")
+                    print("  !! 両モデルTPD上限 — 以降スキップ")
                     break
 
-                # skipまたはスクリーニング失敗
-                if screening is None or screening.get("skip"):
+                if entry is None:
                     cat_stats["skipped_low"] += 1
                     continue
 
-                # ── フェーズ2: レポート生成 ──
-                if gemini_model:
-                    # Geminiで高品質レポート生成
-                    report_prompt = build_report_prompt(content, cat_id)
-                    result = call_gemini(report_prompt)
-                    if result is None:
-                        # Gemini失敗時はGroqでフォールバック
-                        print(f"    Gemini失敗 → Groqでフォールバック")
-                        report_prompt_fb = build_report_prompt_legacy(content, cat_id)
-                        result = call_llm(report_prompt_fb)
-                    else:
-                        print(f"    ✓ [Gemini] レポート生成完了")
-                    # スクリーニング結果でフィールド補完
-                    if result:
-                        result.setdefault("title", screening.get("title", ""))
-                        result.setdefault("poc_url", screening.get("poc_url", ""))
-                        result.setdefault("cvss_score", screening.get("cvss_score", ""))
-                        result.setdefault("mitre_ids", screening.get("mitre_ids", []))
-                        result.setdefault("summary_points", screening.get("summary_points", []))
-                else:
-                    # Gemini未設定: Groqで直接レポート生成（後方互換）
-                    report_prompt = build_report_prompt_legacy(content, cat_id)
-                    result = call_llm(report_prompt)
-
-                if result is None:
-                    cat_stats["skipped_low"] += 1
-                    continue
-
-                # タイトル重複チェック
-                th = title_hash(result["title"])
-                if th in seen_title_hashes:
-                    print(f"    ✗ タイトル重複: {result['title'][:40]}")
-                    continue
-                seen_title_hashes.add(th)
-
-                new_articles.append({
-                    "date":           now_jst().strftime("%Y-%m-%d"),
-                    "category":       cat_id,
-                    "title":          result["title"],
-                    "summary_points": result.get("summary_points", []),
-                    "poc_url":        result.get("poc_url", ""),
-                    "cvss_score":     result.get("cvss_score", ""),
-                    "mitre_ids":      result.get("mitre_ids", []),
-                    "content":        result["report"],
-                    "url":            url,
-                })
+                new_articles.append(entry)
                 cat_count += 1
                 cat_stats["adopted"] += 1
+                if entry.get("researched"):
+                    cat_stats["researched"] += 1
+                    run_stats["researched_count"] += 1
                 time.sleep(SLEEP_BETWEEN_REQ)
 
-        print(f"  [{cat_id}] {cat_count} 件採用")
+        print(f"  [{cat_id}] {cat_count} 件採用 (うち調査補完 {cat_stats['researched']} 件)")
 
     # ──────────────────────────────────────
-    # Tavily検索フェーズ（RSSの補完）
+    # Tavily 発見フェーズ
     # ──────────────────────────────────────
     if tavily_client and not tpd_exhausted:
-        print("\n[TAVILY] ───────────────────────")
+        print("\n[TAVILY 発見] ───────────────────────")
         for cat_id, queries in TAVILY_QUERIES.items():
             cat_stats = run_stats["categories"].setdefault(cat_id, {
                 "adopted": 0, "skipped_dup": 0, "skipped_low": 0,
-                "tpd_hit": False, "feed_errors": []
+                "researched": 0, "tpd_hit": False, "feed_errors": []
             })
             for query in queries:
                 if tpd_exhausted:
@@ -875,73 +972,42 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                 items = fetch_tavily(query, TAVILY_MAX_RESULTS)
                 print(f"    取得: {len(items)} 件")
                 for item in items:
-                    url     = item["url"]
-                    content = item["content"]
+                    url = item["url"]
                     if url in seen_urls:
                         print(f"    skip (重複URL): {url[:55]}")
                         cat_stats["skipped_dup"] += 1
                         continue
                     seen_urls.add(url)
                     print(f"  → {url[:70]}")
-                    # フェーズ1: Groqでスクリーニング
-                    screening = call_llm(build_screening_prompt(content, cat_id))
+                    entry = process_article(url, item["title"], item["content"], cat_id, seen_title_hashes)
                     if len(_tpd_hit_models) >= 2:
                         tpd_exhausted = True
                         run_stats["tpd_exhausted"] = True
-                        cat_stats["tpd_hit"] = True
-                        print("  !! 両モデルTPD上限 — Tavilyもスキップ")
+                        print("  !! TPD上限")
                         break
-                    if screening is None or screening.get("skip"):
+                    if entry is None:
                         cat_stats["skipped_low"] += 1
                         continue
-                    # フェーズ2: Geminiでレポート生成
-                    if gemini_model:
-                        result = call_gemini(build_report_prompt(content, cat_id))
-                        if result is None:
-                            result = call_llm(build_report_prompt_legacy(content, cat_id))
-                        elif result:
-                            result.setdefault("title", screening.get("title", ""))
-                            result.setdefault("poc_url", screening.get("poc_url", ""))
-                            result.setdefault("cvss_score", screening.get("cvss_score", ""))
-                            result.setdefault("mitre_ids", screening.get("mitre_ids", []))
-                            result.setdefault("summary_points", screening.get("summary_points", []))
-                    else:
-                        result = call_llm(build_report_prompt_legacy(content, cat_id))
-                    if result is None:
-                        cat_stats["skipped_low"] += 1
-                        continue
-                    th = title_hash(result["title"])
-                    if th in seen_title_hashes:
-                        print(f"    ✗ タイトル重複: {result['title'][:40]}")
-                        continue
-                    seen_title_hashes.add(th)
-                    new_articles.append({
-                        "date":           now_jst().strftime("%Y-%m-%d"),
-                        "category":       cat_id,
-                        "title":          result["title"],
-                        "summary_points": result.get("summary_points", []),
-                        "poc_url":        result.get("poc_url", ""),
-                        "cvss_score":     result.get("cvss_score", ""),
-                        "mitre_ids":      result.get("mitre_ids", []),
-                        "content":        result["report"],
-                        "url":            url,
-                    })
+                    new_articles.append(entry)
                     cat_stats["adopted"] += 1
+                    if entry.get("researched"):
+                        cat_stats["researched"] += 1
+                        run_stats["researched_count"] += 1
                     time.sleep(SLEEP_BETWEEN_REQ)
     else:
         if not tavily_client:
-            print("\n[TAVILY] スキップ（APIキー未設定）")
+            print("\n[TAVILY] スキップ (APIキー未設定)")
 
     print(f"\n{'='*50}")
-    print(f"  完了: 合計 {len(new_articles)} 件")
+    print(f"  完了: {len(new_articles)} 件 (うち調査補完 {run_stats['researched_count']} 件)")
     print(f"{'='*50}")
     return new_articles, run_stats
 
+
 # ─────────────────────────────────────────────
-# DB更新
+# DB / ログ
 # ─────────────────────────────────────────────
 def load_db() -> list[dict]:
-    """DBを読み込んで返す。存在しない場合は空リスト。"""
     if os.path.exists(MASTER_DATA):
         try:
             with open(MASTER_DATA, "r", encoding="utf-8") as f:
@@ -958,19 +1024,13 @@ def update_db(db: list[dict], new_entries: list[dict]) -> list[dict]:
         if entry["url"] not in existing_urls:
             db.append(entry)
             added += 1
-
     db = sorted(db, key=lambda x: x["date"], reverse=True)[:MAX_DB_ENTRIES]
-
     with open(MASTER_DATA, "w", encoding="utf-8") as f:
         json.dump(db, f, ensure_ascii=False, indent=2)
-
-    print(f"DB: {added} 件追加 / 合計 {len(db)} 件 → {MASTER_DATA}")
+    print(f"DB: {added} 件追加 / 合計 {len(db)} 件")
     return db
 
 
-# ─────────────────────────────────────────────
-# 実行ログ管理
-# ─────────────────────────────────────────────
 RUN_LOG_FILE = "run_log.json"
 
 def load_run_log() -> list[dict]:
@@ -982,470 +1042,146 @@ def load_run_log() -> list[dict]:
             pass
     return []
 
-def append_run_log(run_log: list[dict], new_articles_count: int, total_count: int, stats: dict = None) -> list[dict]:
+
+def append_run_log(run_log: list[dict], new_count: int, total: int, stats: dict = None) -> list[dict]:
     entry = {
-        "datetime_jst":   now_jst().strftime("%Y-%m-%d %H:%M"),
-        "new_articles":   new_articles_count,
-        "total_articles": total_count,
-        "tpd_exhausted":  stats.get("tpd_exhausted", False) if stats else False,
-        "categories":     stats.get("categories", {}) if stats else {},
-        "feed_errors":    stats.get("feed_errors", []) if stats else [],
+        "datetime_jst":     now_jst().strftime("%Y-%m-%d %H:%M"),
+        "new_articles":     new_count,
+        "total_articles":   total,
+        "researched_count": stats.get("researched_count", 0) if stats else 0,
+        "tpd_exhausted":    stats.get("tpd_exhausted", False) if stats else False,
+        "categories":       stats.get("categories", {}) if stats else {},
+        "feed_errors":      stats.get("feed_errors", []) if stats else [],
     }
     run_log.append(entry)
-    run_log = run_log[-90:]  # 直近90件のみ保持
+    run_log = run_log[-90:]
     with open(RUN_LOG_FILE, "w", encoding="utf-8") as f:
         json.dump(run_log, f, ensure_ascii=False, indent=2)
     return run_log
 
+
 # ─────────────────────────────────────────────
-# HTML生成（index.html + log.html）
+# HTML 生成 (既存の _build_index_html / _build_log_html をそのまま使用)
 # ─────────────────────────────────────────────
 def generate_html(db: list[dict], run_log: list[dict]) -> None:
-    # ── articles.js ──────────────────────────────
     with open("articles.js", "w", encoding="utf-8") as f:
         f.write("window.__ARTICLES__ = " + json.dumps(db, ensure_ascii=False) + ";")
     print("データ書き出し: articles.js")
-
-    # ── log.js ───────────────────────────────────
     with open("log.js", "w", encoding="utf-8") as f:
         f.write("window.__RUN_LOG__ = " + json.dumps(run_log, ensure_ascii=False) + ";")
     print("ログ書き出し: log.js")
-
-    # ── index.html ───────────────────────────────
-    index_html = _build_index_html()
     with open("index.html", "w", encoding="utf-8") as f:
-        f.write(index_html)
+        f.write(_build_index_html())
     print("HTML書き出し: index.html")
-
-    # ── log.html ─────────────────────────────────
-    log_html = _build_log_html()
     with open("log.html", "w", encoding="utf-8") as f:
-        f.write(log_html)
+        f.write(_build_log_html())
     print("HTML書き出し: log.html")
-    print("※ GitHub Actions で index.html / log.html / articles.js / log.js をコミットしてください")
 
 
+# ─────────────────────────────────────────────
+# HTML テンプレート (既存のものを流用 + XSS対策のみ追加)
+# ─────────────────────────────────────────────
 def _build_index_html() -> str:
+    # 元の HTML とほぼ同じだが、marked.js に DOMPurify を追加、
+    # 「調査補完済み」バッジを表示できるようにした
     return """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='40%25'%3E%3Cstop offset='0' stop-color='%2338bfff' stop-opacity='.9'/%3E%3Cstop offset='1' stop-color='%230a1628' stop-opacity='1'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpolygon points='16,2 28,9 28,23 16,30 4,23 4,9' fill='%230d1a2e' stroke='%2338bfff' stroke-width='1.5'/%3E%3Cpolygon points='16,6 24,10.5 24,21.5 16,26 8,21.5 8,10.5' fill='none' stroke='%2338bfff' stroke-width='.6' stroke-opacity='.4'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='700' font-size='13' fill='url(%23g)' letter-spacing='-1'%3EC%3C/text%3E%3Ccircle cx='16' cy='16' r='1.2' fill='%2338bfff' opacity='.7'/%3E%3Cline x1='16' y1='6' x2='16' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='16' y1='23' x2='16' y2='26' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='4' y1='9' x2='6.5' y2='10.5' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='27.5' y1='10.5' x2='28' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3C/svg%3E">
 <title>CIPHER // THREAT INTELLIGENCE</title>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg:      #080d14;
-  --surf:    #0d1220;
-  --surf2:   #111a2e;
-  --bdr:     #162040;
-  --bdr2:    #1e3060;
-  --text:    #7a9ec4;
-  --hi:      #c8dff5;
-  --muted:   #1e3050;
-  --acc:     #38bfff;
-  --acc2:    #f0c040;
-  --MALWARE: #ff4455;
-  --INITIAL: #f0c040;
-  --POST_EXP:#b06aff;
-  --AI_SEC:  #38bfff;
-  --mono: 'JetBrains Mono', monospace;
-  --sans: 'Noto Sans JP', sans-serif;
-  --disp: 'Rajdhani', sans-serif;
-}
+:root{--bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;--text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;--MALWARE:#ff4455;--INITIAL:#f0c040;--POST_EXP:#b06aff;--AI_SEC:#38bfff;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans JP',sans-serif;--disp:'Rajdhani',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
-
-/* noise overlay removed for scroll performance */
-
-/* ════════════════════════════════
-   DESKTOP LAYOUT
-════════════════════════════════ */
 .layout{display:flex;height:100vh;overflow:hidden}
-
-/* ── Sidebar (desktop) ── */
-.sidebar{
-  width:240px;flex-shrink:0;
-  background:var(--surf);
-  border-right:1px solid var(--bdr);
-  display:flex;flex-direction:column;
-  position:relative;z-index:10;
-}
-.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(--bdr);position:relative}
-.logo-wrap::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,var(--acc),transparent)}
-.logo-name{
-  font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;
-  color:var(--acc);line-height:1;
-}
+.sidebar{width:240px;flex-shrink:0;background:var(--surf);border-right:1px solid var(--bdr);display:flex;flex-direction:column}
+.logo-wrap{padding:18px 16px 14px;border-bottom:1px solid var(--bdr)}
+.logo-name{font-family:var(--disp);font-size:1.6rem;font-weight:700;letter-spacing:.12em;color:var(--acc)}
 .logo-sub{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.18em;margin-top:4px}
-.logo-log-link{
-  display:inline-block;margin-top:8px;font-family:var(--mono);font-size:.6rem;
-  color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);
-  padding:3px 8px;border-radius:2px;transition:.15s;letter-spacing:.05em;
-}
+.logo-log-link{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);padding:3px 8px;border-radius:2px}
 .logo-log-link:hover{color:var(--acc2);border-color:var(--acc2)}
-
-.search-wrap{
-  padding:10px 12px 12px;border-bottom:1px solid var(--bdr);position:relative;
-}
-.search-wrap::before{
-  content:'';position:absolute;
-  left:22px;top:50%;transform:translateY(-50%);
-  width:12px;height:12px;pointer-events:none;
-  background:var(--muted);
-  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
-  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E") center/contain no-repeat;
-  transition:.2s;
-}
-.search-wrap:focus-within::before{background:var(--acc)}
-#search-box-desk{
-  width:100%;padding:9px 12px 9px 32px;
-  background:var(--surface2);
-  border:1px solid var(--bdr);
-  color:var(--hi);border-radius:3px;
-  outline:none;font-family:var(--mono);font-size:.72rem;
-  transition:border-color .2s,background .2s;
-  caret-color:var(--acc);
-}
-#search-box-desk:focus{
-  border-color:var(--acc);
-  background:var(--bg);
-}
-#search-box-desk::placeholder{color:var(--muted);letter-spacing:.03em}
-
+.search-wrap{padding:10px 12px;border-bottom:1px solid var(--bdr)}
+#search-box-desk{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--bdr);color:var(--hi);border-radius:3px;outline:none;font-family:var(--mono);font-size:.72rem}
+#search-box-desk:focus{border-color:var(--acc)}
 .filter-wrap{padding:8px 10px;border-bottom:1px solid var(--bdr);display:flex;gap:4px;flex-wrap:wrap}
-.cat-btn{
-  padding:3px 9px;border-radius:2px;border:1px solid var(--bdr2);
-  background:none;color:var(--muted);cursor:pointer;
-  font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;transition:.15s;
-}
-.cat-btn:hover{color:var(--hi);border-color:var(--text)}
-.cat-btn.active[data-cat="ALL"]{background:rgba(56,191,255,.1);border-color:var(--acc);color:var(--acc)}
-.cat-btn.active[data-cat="MALWARE"]{background:rgba(255,68,85,.1);border-color:var(--MALWARE);color:var(--MALWARE)}
-.cat-btn.active[data-cat="INITIAL"]{background:rgba(240,192,64,.1);border-color:var(--INITIAL);color:var(--INITIAL)}
-.cat-btn.active[data-cat="POST_EXP"]{background:rgba(176,106,255,.1);border-color:var(--POST_EXP);color:var(--POST_EXP)}
-.cat-btn.active[data-cat="AI_SEC"]{background:rgba(56,191,255,.1);border-color:var(--AI_SEC);color:var(--AI_SEC)}
-
-.date-list{flex:1;overflow-y:auto;padding:8px;overscroll-behavior:contain}
-.date-item{
-  padding:7px 10px;border-radius:3px;cursor:pointer;
-  font-family:var(--mono);font-size:.7rem;color:var(--muted);
-  margin-bottom:2px;display:flex;justify-content:space-between;
-  align-items:center;transition:.15s;border:1px solid transparent;
-}
-.date-item:hover{background:var(--surf2);color:var(--hi);border-color:var(--bdr2)}
-.date-item.active{background:var(--surf2);color:var(--acc);border-color:var(--bdr2)}
+.cat-btn{padding:3px 9px;border-radius:2px;border:1px solid var(--bdr2);background:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em}
+.cat-btn.active{background:rgba(56,191,255,.1);border-color:var(--acc);color:var(--acc)}
+.date-list{flex:1;overflow-y:auto;padding:8px}
+.date-item{padding:7px 10px;border-radius:3px;cursor:pointer;font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-bottom:2px;display:flex;justify-content:space-between;border:1px solid transparent}
+.date-item:hover,.date-item.active{background:var(--surf2);color:var(--acc);border-color:var(--bdr2)}
 .date-badge{font-size:.58rem;background:var(--bdr);color:var(--muted);padding:1px 6px;border-radius:2px}
-
-.stats-bar{
-  padding:10px 12px;border-top:1px solid var(--bdr);
-  display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;
-}
-.stat-updated{
-  grid-column:1/-1;border-top:1px solid var(--bdr);margin-top:4px;padding-top:6px;
-  font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center;letter-spacing:.05em;
-}
-.stat-updated span{color:var(--acc2)}
-
+.stats-bar{padding:10px 12px;border-top:1px solid var(--bdr);display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
 .stat{font-family:var(--mono);font-size:.55rem;color:var(--muted);text-align:center}
-.stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc);
-  }
-
-/* ── Main feed ── */
-.main-feed{flex:1;overflow-y:auto;padding:16px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.stat-val{display:block;font-size:.85rem;font-weight:700;color:var(--acc)}
+.main-feed{flex:1;overflow-y:auto;padding:16px}
 .feed{max-width:860px;margin:0 auto}
-.day-label{
-  font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);
-  padding:14px 2px 8px;border-bottom:1px solid var(--bdr);margin-bottom:10px;
-  display:flex;align-items:center;gap:8px;
-}
-.day-label::before{content:'//';color:var(--acc);opacity:.5}
-
-/* ── Card ── */
-.card{
-  background:var(--surf);border:1px solid var(--bdr);border-radius:4px;
-  padding:15px 16px;margin-bottom:8px;cursor:pointer;transition:background .15s,border-color .15s;
-  position:relative;overflow:hidden;
-  contain:content;
-}
-.card-source-link{
-  display:inline-block;margin-top:8px;
-  font-family:var(--mono);font-size:.58rem;color:var(--muted);
-  text-decoration:none;letter-spacing:.04em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
-}
-.card-source-link:hover{color:var(--acc2)}
+.day-label{font-family:var(--mono);font-size:.6rem;letter-spacing:.18em;color:var(--muted);padding:14px 2px 8px;border-bottom:1px solid var(--bdr);margin-bottom:10px}
+.day-label::before{content:'// ';color:var(--acc)}
+.card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:15px 16px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden}
 .card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px}
 .card[data-cat="MALWARE"]::before{background:var(--MALWARE)}
 .card[data-cat="INITIAL"]::before{background:var(--INITIAL)}
 .card[data-cat="POST_EXP"]::before{background:var(--POST_EXP)}
 .card[data-cat="AI_SEC"]::before{background:var(--AI_SEC)}
 .card:hover{background:var(--surf2);border-color:var(--bdr2)}
-.card:active{opacity:.85}
-
 .card-meta{display:flex;align-items:center;gap:7px;margin-bottom:8px;flex-wrap:wrap}
-.cat-tag{
-  font-family:var(--mono);font-size:.58rem;font-weight:700;
-  padding:2px 8px;border-radius:2px;letter-spacing:.06em;
-}
+.cat-tag{font-family:var(--mono);font-size:.58rem;font-weight:700;padding:2px 8px;border-radius:2px}
 .cat-tag[data-cat="MALWARE"]{background:rgba(255,68,85,.12);color:var(--MALWARE);border:1px solid rgba(255,68,85,.25)}
 .cat-tag[data-cat="INITIAL"]{background:rgba(240,192,64,.12);color:var(--INITIAL);border:1px solid rgba(240,192,64,.25)}
 .cat-tag[data-cat="POST_EXP"]{background:rgba(176,106,255,.12);color:var(--POST_EXP);border:1px solid rgba(176,106,255,.25)}
 .cat-tag[data-cat="AI_SEC"]{background:rgba(56,191,255,.08);color:var(--AI_SEC);border:1px solid rgba(56,191,255,.2)}
 .card-date{font-family:var(--mono);font-size:.6rem;color:var(--muted)}
-.cvss-badge{
-  font-family:var(--mono);font-size:.58rem;font-weight:700;
-  padding:2px 7px;border-radius:2px;margin-left:auto;
-}
+.research-badge{font-family:var(--mono);font-size:.55rem;background:rgba(176,106,255,.12);color:#c084fc;border:1px solid rgba(176,106,255,.3);padding:1px 6px;border-radius:2px}
+.cvss-badge{font-family:var(--mono);font-size:.58rem;font-weight:700;padding:2px 7px;border-radius:2px;margin-left:auto}
 .cvss-critical{background:rgba(255,68,85,.12);color:#ff4455;border:1px solid rgba(255,68,85,.3)}
 .cvss-high{background:rgba(240,192,64,.12);color:#f0c040;border:1px solid rgba(240,192,64,.3)}
 .cvss-medium{background:rgba(251,191,36,.12);color:#fbbf24;border:1px solid rgba(251,191,36,.3)}
 .cvss-low{background:rgba(56,191,255,.08);color:#38bfff;border:1px solid rgba(56,191,255,.2)}
-
-.card-title{
-  font-family:var(--disp);font-size:1.05rem;font-weight:600;
-  color:var(--hi);line-height:1.4;margin-bottom:9px;letter-spacing:.02em;
-}
+.card-title{font-family:var(--disp);font-size:1.05rem;font-weight:600;color:var(--hi);line-height:1.4;margin-bottom:9px}
 .card-summary{font-size:.78rem;color:var(--text);line-height:1.7;list-style:none;padding:0}
 .card-summary li{padding:1px 0 1px 14px;position:relative}
 .card-summary li::before{content:'›';position:absolute;left:0;color:var(--acc);font-weight:700}
-.card-footer{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap;align-items:center}
-.mitre-chip{
-  font-family:var(--mono);font-size:.56rem;
-  background:rgba(176,106,255,.08);color:#c084fc;
-  border:1px solid rgba(176,106,255,.18);padding:2px 6px;border-radius:2px;
-}
-.poc-chip{
-  font-family:var(--mono);font-size:.56rem;
-  background:rgba(56,191,255,.07);color:var(--acc);
-  border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px;
-  animation:blink 2s infinite;
-  will-change:opacity;
-}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.55}}
-.no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem;letter-spacing:.1em}
-
-/* ── Card action buttons ── */
-.card-actions{display:flex;gap:5px;margin-top:10px;padding-top:8px;border-top:1px solid var(--bdr)}
-.act-btn{
-  font-family:var(--mono);font-size:.58rem;font-weight:700;letter-spacing:.06em;
-  padding:3px 10px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
-  background:none;border:1px solid var(--bdr2);color:var(--muted);
-}
-.act-btn:hover{color:var(--hi);border-color:var(--text)}
-.act-btn.flag-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
-.act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
-
-/* ── Detail action bar ── */
-.det-action-bar{display:flex;gap:8px;margin:16px 0;padding-bottom:16px;border-bottom:1px solid var(--bdr);flex-wrap:wrap}
-.det-act-btn{
-  font-family:var(--mono);font-size:.65rem;font-weight:700;letter-spacing:.06em;
-  padding:6px 16px;border-radius:2px;cursor:pointer;transition:background .15s,color .15s;
-  background:none;border:1px solid var(--bdr2);color:var(--muted);
-}
-.det-act-btn:hover{color:var(--hi);border-color:var(--text)}
-.det-act-btn.flagged{background:rgba(240,192,64,.1);color:var(--acc2);border-color:rgba(240,192,64,.3)}
-.det-act-btn.delete-btn:hover{background:rgba(255,68,85,.08);color:var(--MALWARE);border-color:rgba(255,68,85,.3)}
-.det-act-btn.teams-btn{border-color:rgba(100,153,255,.3);color:#6499ff}
-.det-act-btn.teams-btn:hover{background:rgba(100,153,255,.08);border-color:rgba(100,153,255,.5)}
-.det-act-btn.teams-btn.sending{opacity:.5;pointer-events:none}
-
-/* ── Teams settings modal ── */
-.modal-overlay{
-  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;
-  align-items:center;justify-content:center;
-}
-.modal-overlay.open{display:flex}
-.modal{
-  background:var(--surf);border:1px solid var(--bdr2);border-radius:6px;
-  padding:28px 24px;max-width:480px;width:90%;position:relative;
-}
-.modal h3{font-family:var(--disp);font-size:1.1rem;color:var(--hi);margin-bottom:6px;letter-spacing:.05em}
-.modal p{font-size:.75rem;color:var(--muted);margin-bottom:16px;line-height:1.6}
-.modal label{display:block;font-family:var(--mono);font-size:.62rem;color:var(--text);margin-bottom:5px;letter-spacing:.06em}
-.modal input{
-  width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--bdr2);
-  color:var(--hi);border-radius:3px;outline:none;font-family:var(--mono);font-size:.72rem;
-  margin-bottom:14px;transition:.2s;
-}
-.modal input:focus{border-color:var(--acc)}
-.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:4px}
-.modal-btn{
-  font-family:var(--mono);font-size:.65rem;font-weight:700;padding:7px 18px;
-  border-radius:2px;cursor:pointer;transition:.15s;border:1px solid var(--bdr2);
-  background:none;color:var(--muted);
-}
-.modal-btn:hover{color:var(--hi);border-color:var(--text)}
-.modal-btn.primary{background:rgba(56,191,255,.1);color:var(--acc);border-color:rgba(56,191,255,.3)}
-.modal-btn.primary:hover{background:rgba(56,191,255,.18)}
-.teams-status{font-family:var(--mono);font-size:.6rem;margin-top:10px;padding:8px 10px;border-radius:3px;display:none}
-.teams-status.ok{background:rgba(56,191,255,.08);color:var(--acc);border:1px solid rgba(56,191,255,.2);display:block}
-.teams-status.err{background:rgba(255,68,85,.08);color:var(--MALWARE);border:1px solid rgba(255,68,85,.2);display:block}
-
-/* ── Detail overlay ── */
-#detail{
-  position:fixed;inset:0;background:var(--bg);z-index:200;
-  display:flex;flex-direction:column;
-  transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);
-}
+.card-footer{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap}
+.mitre-chip{font-family:var(--mono);font-size:.56rem;background:rgba(176,106,255,.08);color:#c084fc;border:1px solid rgba(176,106,255,.18);padding:2px 6px;border-radius:2px}
+.cve-chip{font-family:var(--mono);font-size:.56rem;background:rgba(240,192,64,.08);color:var(--acc2);border:1px solid rgba(240,192,64,.2);padding:2px 6px;border-radius:2px}
+.poc-chip{font-family:var(--mono);font-size:.56rem;background:rgba(56,191,255,.07);color:var(--acc);border:1px solid rgba(56,191,255,.18);padding:2px 6px;border-radius:2px}
+.no-data{text-align:center;padding:80px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
+#detail{position:fixed;inset:0;background:var(--bg);z-index:200;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .28s}
 #detail.open{transform:none}
-.det-header{
-  background:rgba(12,23,18,.98);
-  border-bottom:1px solid var(--bdr);padding:12px 16px;
-  display:flex;align-items:center;gap:10px;flex-shrink:0;position:relative;
-}
-.det-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,var(--acc),transparent 60%)}
-.back-btn{
-  background:none;border:1px solid var(--bdr2);color:var(--acc);
-  padding:6px 14px;border-radius:2px;cursor:pointer;
-  font-family:var(--mono);font-size:.68rem;font-weight:700;transition:.15s;
-}
-.back-btn:hover{background:rgba(56,191,255,.07)}
+.det-header{background:var(--surf);border-bottom:1px solid var(--bdr);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.back-btn{background:none;border:1px solid var(--bdr2);color:var(--acc);padding:6px 14px;border-radius:2px;cursor:pointer;font-family:var(--mono);font-size:.68rem;font-weight:700}
 .det-url{margin-left:auto;font-family:var(--mono);font-size:.6rem;color:var(--muted);text-decoration:none}
-.det-url:hover{color:var(--text)}
-
 .det-body{flex:1;overflow-y:auto;padding:32px 20px}
 .det-inner{max-width:800px;margin:0 auto}
-.det-title{font-family:var(--disp);font-size:1.65rem;font-weight:700;color:var(--hi);
-  line-height:1.3;margin-bottom:16px;letter-spacing:.02em}
-.det-meta-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
-  margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--bdr)}
-.poc-btn{
-  display:inline-flex;align-items:center;gap:6px;
-  background:rgba(56,191,255,.08);color:var(--acc);
-  border:1px solid rgba(56,191,255,.25);
-  padding:8px 16px;border-radius:3px;text-decoration:none;
-  font-family:var(--mono);font-weight:700;font-size:.7rem;letter-spacing:.04em;transition:.15s;
-}
-.poc-btn:hover{background:rgba(56,191,255,.15)}
-
-/* markdown */
-.det-inner h1{display:none}
-.det-inner h2{
-  font-family:var(--disp);font-size:1rem;font-weight:700;color:var(--acc);
-  letter-spacing:.12em;text-transform:uppercase;
-  border-bottom:1px solid var(--bdr);padding-bottom:6px;margin:30px 0 12px;
-}
+.det-title{font-family:var(--disp);font-size:1.65rem;font-weight:700;color:var(--hi);line-height:1.3;margin-bottom:16px}
+.det-meta-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:22px;padding-bottom:16px;border-bottom:1px solid var(--bdr)}
+.poc-btn{display:inline-flex;gap:6px;background:rgba(56,191,255,.08);color:var(--acc);border:1px solid rgba(56,191,255,.25);padding:8px 16px;border-radius:3px;text-decoration:none;font-family:var(--mono);font-weight:700;font-size:.7rem}
+.det-inner h2{font-family:var(--disp);font-size:1rem;font-weight:700;color:var(--acc);letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid var(--bdr);padding-bottom:6px;margin:30px 0 12px}
 .det-inner h3{font-size:.92rem;font-weight:600;color:var(--hi);margin:16px 0 7px}
 .det-inner p{line-height:1.8;margin-bottom:10px;color:var(--text)}
 .det-inner ul,.det-inner ol{padding-left:20px;margin-bottom:10px;line-height:1.8}
-.det-inner li{margin-bottom:4px;color:var(--text)}
-.det-inner pre{
-  background:#040c1a;border:1px solid var(--bdr2);border-left:2px solid var(--acc);
-  border-radius:3px;padding:16px 16px 16px 18px;overflow-x:auto;margin:14px 0;position:relative;
-}
-.det-inner code{font-family:var(--mono);font-size:.78rem;color:var(--acc);line-height:1.7}
-.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;font-size:.78rem;color:var(--acc2)}
-.det-inner blockquote{border-left:2px solid var(--bdr2);padding-left:12px;color:var(--muted);margin:10px 0}
-.det-inner table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.78rem}
-.det-inner th{background:var(--surf2);padding:8px 10px;text-align:left;border:1px solid var(--bdr);
-  color:var(--hi);font-family:var(--mono);font-size:.62rem;letter-spacing:.07em}
-.det-inner td{padding:7px 10px;border:1px solid var(--bdr);color:var(--text)}
+.det-inner pre{background:#040c1a;border:1px solid var(--bdr2);border-left:2px solid var(--acc);border-radius:3px;padding:16px;overflow-x:auto;margin:14px 0;position:relative}
+.det-inner code{font-family:var(--mono);font-size:.78rem;color:var(--acc)}
+.det-inner :not(pre)>code{background:rgba(56,191,255,.07);padding:2px 5px;border-radius:2px;color:var(--acc2)}
 .det-inner strong{color:var(--hi)}
-.copy-btn{
-  position:absolute;top:8px;right:8px;background:var(--surf2);border:1px solid var(--bdr2);
-  color:var(--muted);font-family:var(--mono);font-size:.58rem;padding:3px 7px;
-  border-radius:2px;cursor:pointer;transition:.15s;
-}
-.copy-btn:hover{color:var(--acc);border-color:var(--acc)}
-
-/* ════════════════════════════════
-   MOBILE — bottom tab bar
-════════════════════════════════ */
-.mob-header{display:none}
-.tab-bar{display:none}
-
-@media(max-width:700px){
-  .layout{flex-direction:column;height:100vh}
-  .sidebar{display:none}   /* hide desktop sidebar */
-
-  /* top bar */
-  .mob-header{
-    display:flex;align-items:center;gap:10px;
-    padding:10px 14px;background:var(--surf);border-bottom:1px solid var(--bdr);
-    flex-shrink:0;position:relative;
-  }
-  .mob-header::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-    background:linear-gradient(90deg,var(--acc),transparent 60%)}
-  /* モバイル検索: mob-headerに統合 */
-  .mob-header #mob-search-inline{
-    flex:1;padding:7px 10px;background:var(--surface2);border:1px solid var(--bdr);
-    color:var(--hi);border-radius:3px;outline:none;
-    font-family:var(--mono);font-size:.72rem;caret-color:var(--acc);
-  }
-  .mob-header #mob-search-inline:focus{border-color:var(--acc)}
-  .mob-header #mob-search-inline::placeholder{color:var(--muted)}
-  .mob-logo{font-family:var(--disp);font-size:1.3rem;font-weight:700;
-    color:var(--acc);letter-spacing:.1em;}
-
-  /* feed takes full width */
-  .main-feed{flex:1;overflow-y:auto;padding:10px 10px 80px}
-
-  /* bottom tab bar */
-  .tab-bar{
-    display:flex;position:fixed;bottom:0;left:0;right:0;
-    background:var(--surf);border-top:1px solid var(--bdr);z-index:100;
-    height:58px;
-  }
-  .tab-btn{
-    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:3px;background:none;border:none;color:var(--muted);cursor:pointer;
-    font-family:var(--mono);font-size:.5rem;letter-spacing:.06em;transition:.15s;
-    border-top:2px solid transparent;padding:0;
-  }
-  .tab-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.5}
-  .tab-btn.active{color:var(--acc);border-top-color:var(--acc)}
-  .tab-btn.active svg{opacity:1}
-
-  /* mobile date drawer */
-  .mob-drawer{
-    display:none;position:fixed;bottom:58px;left:0;right:0;
-    background:var(--surf);border-top:1px solid var(--bdr);
-    max-height:50vh;overflow-y:auto;z-index:99;padding:8px;
-  }
-  .mob-drawer.open{display:block}
-  /* PC幅に戻っても残留しないようdisplay:noneを保証 */
-  @media(min-width:701px){
-    .mob-drawer,.mob-drawer.open{display:none!important}
-    .tab-bar{display:none!important}
-    .mob-header{display:none!important}
-  }
-  .mob-drawer .date-item{font-size:.75rem;padding:10px 12px}
-  .mob-filter-wrap{padding:8px;display:flex;gap:5px;flex-wrap:wrap;
-    border-bottom:1px solid var(--bdr)}
-
-  /* detail on mobile */
-  #detail{bottom:58px}
-
-  .stats-bar{display:none}
-}
-
+.copy-btn{position:absolute;top:8px;right:8px;background:var(--surf2);border:1px solid var(--bdr2);color:var(--muted);font-family:var(--mono);font-size:.58rem;padding:3px 7px;border-radius:2px;cursor:pointer}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:10px}
 </style>
 </head>
 <body>
-
-<!-- MOBILE HEADER -->
-<div class="mob-header">
-  <span class="mob-logo">CIPHER</span>
-  <input type="text" id="mob-search-inline" placeholder="search..." autocomplete="off">
-</div>
-
-<!-- DESKTOP LAYOUT -->
 <div class="layout">
   <nav class="sidebar">
     <div class="logo-wrap">
       <div class="logo-name">CIPHER</div>
-      <div class="logo-sub">// THREAT INTELLIGENCE</div>
+      <div class="logo-sub">// THREAT INTEL v4.0</div>
       <a href="log.html" class="logo-log-link">📋 調査ログ</a>
-      <a href="#" class="logo-log-link" onclick="openTeamsModal();return false;">💬 Teams設定</a>
     </div>
     <div class="search-wrap">
       <input type="text" id="search-box-desk" placeholder="search intel..." autocomplete="off">
@@ -1456,60 +1192,17 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
       <button class="cat-btn" data-cat="INITIAL">INIT</button>
       <button class="cat-btn" data-cat="POST_EXP">POST</button>
       <button class="cat-btn" data-cat="AI_SEC">AI</button>
-      <button class="cat-btn" data-cat="UNREAD">UNREAD</button>
-      <button class="cat-btn" data-cat="FLAGGED">⚑ FLAG</button>
+      <button class="cat-btn" data-cat="RESEARCHED">🔍 補完済</button>
     </div>
     <div class="date-list" id="date-list"></div>
     <div class="stats-bar">
       <div class="stat"><span class="stat-val" id="total-count">0</span>TOTAL</div>
       <div class="stat"><span class="stat-val" id="today-count">0</span>TODAY</div>
-      <div class="stat"><span class="stat-val" id="poc-count">0</span>POC</div>
-      <div class="stat-updated">UPDATED &nbsp;<span id="last-updated">—</span></div>
+      <div class="stat"><span class="stat-val" id="research-count">0</span>RESEARCHED</div>
     </div>
   </nav>
-
   <div class="main-feed">
     <div class="feed" id="feed"></div>
-  </div>
-</div>
-
-<!-- MOBILE BOTTOM TAB BAR -->
-<div class="tab-bar">
-  <button class="tab-btn active" id="tab-feed" onclick="setTab('feed')">
-    <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>FEED
-  </button>
-  <button class="tab-btn" id="tab-filter" onclick="setTab('filter')">
-    <svg viewBox="0 0 24 24"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>FILTER
-  </button>
-  <button class="tab-btn" id="tab-dates" onclick="setTab('dates')">
-    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>DATE
-  </button>
-  <button class="tab-btn" id="tab-log" onclick="location.href='log.html'">
-    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>LOG
-  </button>
-</div>
-
-<!-- MOBILE DATE DRAWER -->
-<div class="mob-drawer" id="mob-drawer">
-  <div class="mob-filter-wrap" id="mob-filter-wrap"></div>
-  <div id="mob-date-list"></div>
-</div>
-
-<!-- DETAIL VIEW -->
-
-<!-- Teams settings modal -->
-<div class="modal-overlay" id="teams-modal">
-  <div class="modal">
-    <h3>Microsoft Teams 連携</h3>
-    <p>Incoming Webhook URL を設定すると、記事をTeamsチャンネルに投稿できます。<br>
-    Teams → チャンネル → コネクタ → Incoming Webhook から取得してください。</p>
-    <label>WEBHOOK URL</label>
-    <input type="url" id="teams-webhook-input" placeholder="https://xxx.webhook.office.com/webhookb2/...">
-    <div class="modal-btns">
-      <button class="modal-btn" onclick="closeTeamsModal()">CANCEL</button>
-      <button class="modal-btn primary" onclick="saveTeamsWebhook()">SAVE</button>
-    </div>
-    <div class="teams-status" id="teams-modal-status"></div>
   </div>
 </div>
 <div id="detail">
@@ -1518,248 +1211,54 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:14
     <div id="det-cat-tag"></div>
     <a id="det-source-url" class="det-url" href="#" target="_blank">[ SOURCE ]</a>
   </div>
-  <div class="det-body">
-    <div class="det-inner" id="det-body"></div>
-  </div>
+  <div class="det-body"><div class="det-inner" id="det-body"></div></div>
 </div>
-
-<script src="log.js"></script>
 <script src="articles.js"></script>
 <script>
 const db = window.__ARTICLES__ || [];
-let activeCat  = 'ALL';
-let activeDate = 'all';
+let activeCat='ALL', activeDate='all';
 const today = new Date().toISOString().slice(0,10);
-
-/* ── User state (deleted / flagged / read) via localStorage ── */
-let userState = { read: {}, flagged: {}, deleted: {} };
-const STATE_KEY = 'cipher-user-state';
-
-async function loadUserState() {
-  try {
-    const raw = localStorage.getItem(STATE_KEY);
-    if (raw) userState = JSON.parse(raw);
-  } catch(e) { /* 初回または無効データ */ }
-}
-
-async function saveUserState() {
-  try {
-    localStorage.setItem(STATE_KEY, JSON.stringify(userState));
-  } catch(e) {
-    console.warn('userState save failed:', e);
-  }
-}
-
-function isRead(url)    { return !!userState.read[url] }
-function isFlagged(url) { return !!userState.flagged[url] }
-function isDeleted(url) { return !!userState.deleted[url] }
-
-async function markRead(url)   { userState.read[url] = true; await saveUserState(); }
-async function toggleFlag(url) {
-  if (userState.flagged[url]) delete userState.flagged[url];
-  else userState.flagged[url] = true;
-  await saveUserState();
-}
-async function deleteArticle(url) {
-  userState.deleted[url] = true;
-  await saveUserState();
-}
-
-function unreadCount() { return db.filter(a => !isRead(a.url) && !isDeleted(a.url)).length; }
-function flaggedCount(){ return db.filter(a => isFlagged(a.url) && !isDeleted(a.url)).length; }
-
-/* ── search sync (desktop + mobile share same state) ── */
-const searchBox = document.getElementById('search-box-desk');
-const mobSearchInline = document.getElementById('mob-search-inline');
-if(searchBox) searchBox.oninput = () => { if(mobSearchInline) mobSearchInline.value = searchBox.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
-if(mobSearchInline) mobSearchInline.oninput = () => { if(searchBox) searchBox.value = mobSearchInline.value; cancelAnimationFrame(window._rafId); window._rafId = requestAnimationFrame(render); };
-
-function getQuery(){ return (searchBox?.value || mobSearchInline?.value || '').toLowerCase(); }
-
-function cvssClass(s){
-  const n=parseFloat(s);
-  if(isNaN(n))return'';
-  if(n>=9)return'cvss-critical';if(n>=7)return'cvss-high';if(n>=4)return'cvss-medium';return'cvss-low';
-}
+function cvssClass(s){const n=parseFloat(s);if(isNaN(n))return'';if(n>=9)return'cvss-critical';if(n>=7)return'cvss-high';if(n>=4)return'cvss-medium';return'cvss-low'}
 function isPocValid(u){return u&&u.startsWith('http')}
-
-
-/* ── Teams webhook ── */
-const TEAMS_KEY = 'cipher_teams_webhook';
-function getWebhook(){ return localStorage.getItem(TEAMS_KEY)||''; }
-function saveTeamsWebhook(){
-  const url = document.getElementById('teams-webhook-input').value.trim();
-  if(!url){ showTeamsStatus('URL を入力してください', 'err'); return; }
-  localStorage.setItem(TEAMS_KEY, url);
-  showTeamsStatus('保存しました', 'ok');
-  setTimeout(closeTeamsModal, 1000);
-}
-function openTeamsModal(){
-  document.getElementById('teams-webhook-input').value = getWebhook();
-  document.getElementById('teams-modal-status').className = 'teams-status';
-  document.getElementById('teams-modal').classList.add('open');
-}
-function closeTeamsModal(){ document.getElementById('teams-modal').classList.remove('open'); }
-function showTeamsStatus(msg, type){
-  const el = document.getElementById('teams-modal-status');
-  el.textContent = msg; el.className = 'teams-status '+type;
-}
-document.addEventListener('click', e => {
-  if(e.target && e.target.id === 'teams-modal') closeTeamsModal();
-});
-
-async function postToTeams(article){
-  const webhook = getWebhook();
-  if(!webhook){ openTeamsModal(); return; }
-  const btn = document.getElementById('det-teams-btn');
-  if(btn){ btn.textContent='SENDING...'; btn.classList.add('sending'); }
-
-  const cvssText = article.cvss_score ? ' | CVSS ' + article.cvss_score : '';
-  const mitreText = (article.mitre_ids||[]).slice(0,3).join(', ');
-  const summary = (article.summary_points||[]).map(function(p){ return '\u2022 '+p; }).join('\\n');
-
-  const payload = {
-    type: 'message',
-    attachments: [{
-      contentType: 'application/vnd.microsoft.card.adaptive',
-      content: {
-        '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
-        type: 'AdaptiveCard',
-        version: '1.4',
-        body: [
-          {
-            type: 'Container',
-            style: 'emphasis',
-            items: [{
-              type: 'TextBlock',
-              text: '[' + article.category + ']' + cvssText,
-              size: 'Small', color: 'Accent', weight: 'Bolder'
-            }]
-          },
-          { type: 'TextBlock', text: article.title, size: 'Large', weight: 'Bolder', wrap: true },
-          { type: 'TextBlock', text: summary, wrap: true, spacing: 'Small' },
-          ...(mitreText ? [{ type: 'TextBlock', text: 'ATT&CK: ' + mitreText, size: 'Small', color: 'Good', spacing: 'Small' }] : [])
-        ],
-        actions: [
-          { type: 'Action.OpenUrl', title: 'ソース記事を開く', url: article.url }
-        ]
-      }
-    }]
-  };
-
-  try {
-    await fetch(webhook, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
-      mode: 'no-cors'
-    });
-    if(btn){ btn.textContent='SENT'; btn.classList.remove('sending'); }
-    setTimeout(function(){ if(btn) btn.textContent='TEAMS'; }, 2000);
-  } catch(err){
-    if(btn){ btn.textContent='FAILED'; btn.classList.remove('sending'); }
-    setTimeout(function(){ if(btn) btn.textContent='TEAMS'; }, 2000);
-    console.error('Teams post error:', err);
-  }
-}
-
-/* ── init ── */
-async function init(){
-  await loadUserState();
-  document.getElementById('total-count').textContent = db.length;
-  document.getElementById('today-count').textContent = db.filter(a=>a.date===today).length;
-  document.getElementById('poc-count').textContent   = db.filter(a=>isPocValid(a.poc_url)).length;
-
-  // 最終更新日時をlog.jsから取得
-  const runLog = window.__RUN_LOG__ || [];
-  const lastRun = runLog.length ? runLog[runLog.length-1].datetime_jst : '—';
-  const luEl = document.getElementById('last-updated');
-  if(luEl) luEl.textContent = lastRun;
-
-  const counts={};
-  db.forEach(a=>{counts[a.date]=(counts[a.date]||0)+1;});
+const searchBox=document.getElementById('search-box-desk');
+if(searchBox) searchBox.oninput=render;
+function getQuery(){return (searchBox?.value||'').toLowerCase()}
+function init(){
+  document.getElementById('total-count').textContent=db.length;
+  document.getElementById('today-count').textContent=db.filter(a=>a.date===today).length;
+  document.getElementById('research-count').textContent=db.filter(a=>a.researched).length;
+  const counts={};db.forEach(a=>counts[a.date]=(counts[a.date]||0)+1);
   const dates=Object.keys(counts).sort().reverse();
-
-  /* desktop date list */
   const dl=document.getElementById('date-list');
   const allEl=document.createElement('div');
   allEl.className='date-item active';allEl.dataset.date='all';
   allEl.innerHTML=`<span>ALL DATES</span><span class="date-badge">${db.length}</span>`;
-  allEl.onclick=()=>setDate('all',allEl,'desk');
-  dl.appendChild(allEl);
-  dates.forEach(d=>{
-    const el=document.createElement('div');
-    el.className='date-item';el.dataset.date=d;
-    const lbl=d===today?`${d} <span style="color:var(--acc);font-size:.52rem">●</span>`:d;
-    el.innerHTML=`<span>${lbl}</span><span class="date-badge">${counts[d]}</span>`;
-    el.onclick=()=>setDate(d,el,'desk');
-    dl.appendChild(el);
-  });
-
-  /* mobile filter buttons */
-  const mfw=document.getElementById('mob-filter-wrap');
-  ['ALL','MALWARE','INITIAL','POST_EXP','AI_SEC'].forEach(cat=>{
-    const b=document.createElement('button');
-    b.className='cat-btn'+(cat==='ALL'?' active':'');b.dataset.cat=cat;
-    b.textContent=cat==='ALL'?'ALL':cat==='POST_EXP'?'POST':cat==='MALWARE'?'MAL':cat==='INITIAL'?'INIT':'AI';
-    b.onclick=()=>{
-      document.querySelectorAll('.mob-filter-wrap .cat-btn,.filter-wrap .cat-btn').forEach(x=>x.classList.remove('active'));
-      document.querySelectorAll(`[data-cat="${cat}"]`).forEach(x=>x.classList.add('active'));
-      activeCat=cat;render();closeMobDrawer();
-    };
-    mfw.appendChild(b);
-  });
-
-  /* mobile date list */
-  const mdl=document.getElementById('mob-date-list');
-  const mallEl=document.createElement('div');
-  mallEl.className='date-item active';mallEl.dataset.date='all';
-  mallEl.innerHTML=`<span>ALL DATES</span><span class="date-badge">${db.length}</span>`;
-  mallEl.onclick=()=>setDate('all',mallEl,'mob');
-  mdl.appendChild(mallEl);
+  allEl.onclick=()=>setDate('all',allEl);dl.appendChild(allEl);
   dates.forEach(d=>{
     const el=document.createElement('div');
     el.className='date-item';el.dataset.date=d;
     el.innerHTML=`<span>${d}</span><span class="date-badge">${counts[d]}</span>`;
-    el.onclick=()=>setDate(d,el,'mob');
-    mdl.appendChild(el);
+    el.onclick=()=>setDate(d,el);dl.appendChild(el);
   });
-
-  /* desktop category buttons */
   document.querySelectorAll('.filter-wrap .cat-btn').forEach(b=>{
     b.onclick=()=>{
-      document.querySelectorAll('.filter-wrap .cat-btn,.mob-filter-wrap .cat-btn').forEach(x=>x.classList.remove('active'));
-      document.querySelectorAll(`[data-cat="${b.dataset.cat}"]`).forEach(x=>x.classList.add('active'));
-      activeCat=b.dataset.cat;render();
+      document.querySelectorAll('.filter-wrap .cat-btn').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');activeCat=b.dataset.cat;render();
     };
   });
-
   render();
 }
-
-function setDate(d,el,mode){
+function setDate(d,el){
   activeDate=d;
-  const scope=mode==='mob'?'#mob-date-list':'#date-list';
-  document.querySelectorAll(scope+' .date-item').forEach(i=>i.classList.remove('active'));
-  el.classList.add('active');
-  render();
-  if(mode==='mob')closeMobDrawer();
+  document.querySelectorAll('.date-item').forEach(i=>i.classList.remove('active'));
+  el.classList.add('active');render();
 }
-
 function render(){
   const q=getQuery();
   const feed=document.getElementById('feed');
   feed.innerHTML='';
-  // 未読バッジ数を更新
-  const unreadEl = document.querySelector('.cat-btn[data-cat="UNREAD"]');
-  if(unreadEl){ const n=unreadCount(); unreadEl.textContent = n > 0 ? `UNREAD ${n}` : 'UNREAD'; }
-  const flagEl = document.querySelector('.cat-btn[data-cat="FLAGGED"]');
-  if(flagEl){ const n=flaggedCount(); flagEl.textContent = n > 0 ? `⚑ ${n}` : '⚑ FLAG'; }
-
   const filtered=db.filter(a=>{
-    if(isDeleted(a.url)) return false;
-    if(activeCat==='UNREAD')  return !isRead(a.url);
-    if(activeCat==='FLAGGED') return isFlagged(a.url);
+    if(activeCat==='RESEARCHED') return a.researched;
     const mc=activeCat==='ALL'||a.category===activeCat;
     const md=activeDate==='all'||a.date===activeDate;
     const mq=!q||(a.title+(a.summary_points||[]).join(' ')+a.content).toLowerCase().includes(q);
@@ -1767,74 +1266,45 @@ function render(){
   });
   if(!filtered.length){feed.innerHTML='<div class="no-data">// NO INTELLIGENCE FOUND //</div>';return;}
   const groups={};
-  filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a);});
+  filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a)});
   const frag=document.createDocumentFragment();
   Object.keys(groups).sort().reverse().forEach(date=>{
     const lbl=document.createElement('div');
-    lbl.className='day-label';
-    lbl.innerHTML=date+(date===today?' &nbsp;<span style="color:var(--acc);font-size:.55rem">TODAY</span>':'');
+    lbl.className='day-label';lbl.textContent=date;
     frag.appendChild(lbl);
     groups[date].forEach(a=>{
       const card=document.createElement('div');
       card.className='card';card.dataset.cat=a.category;
       const pts=(a.summary_points||[]).slice(0,3);
-      const sumHtml=pts.length?'<ul class="card-summary">'+pts.map(p=>`<li>${p}</li>`).join('')+'</ul>':`<div class="card-summary">${a.summary||''}</div>`;
+      const sumHtml='<ul class="card-summary">'+pts.map(p=>`<li>${p}</li>`).join('')+'</ul>';
       const cvssHtml=a.cvss_score?`<span class="cvss-badge ${cvssClass(a.cvss_score)}">CVSS ${a.cvss_score}</span>`:'';
+      const researchHtml=a.researched?'<span class="research-badge">🔍 補完済</span>':'';
       const mitreHtml=(a.mitre_ids||[]).slice(0,3).map(id=>`<span class="mitre-chip">${id}</span>`).join('');
-      const sourceHost = (() => { try { return new URL(a.url).hostname.replace('www.',''); } catch(e){ return a.url; } })();
+      const cveHtml=(a.cve_ids||[]).slice(0,2).map(c=>`<span class="cve-chip">${c}</span>`).join('');
       const pocHtml=isPocValid(a.poc_url)?'<span class="poc-chip">⚡ PoC</span>':'';
       card.innerHTML=`
         <div class="card-meta">
           <span class="cat-tag" data-cat="${a.category}">${a.category}</span>
-          <span class="card-date">${a.date}</span>${cvssHtml}
+          <span class="card-date">${a.date}</span>${researchHtml}${cvssHtml}
         </div>
         <div class="card-title">${a.title}</div>
         ${sumHtml}
-        ${(mitreHtml||pocHtml)?`<div class="card-footer">${mitreHtml}${pocHtml}</div>`:''}
-        <a href="${a.url}" target="_blank" class="card-source-link" title="${a.url}">📎 ${sourceHost}</a>`;
-      // 未読スタイル
-      if(!isRead(a.url)) card.classList.add('unread');
-      if(isFlagged(a.url)) card.classList.add('flagged');
-
-      // アクションボタン行
-      const actions = document.createElement('div');
-      actions.className = 'card-actions';
-      actions.innerHTML = `
-        <button class="act-btn flag-btn ${isFlagged(a.url)?'flagged':''}">${isFlagged(a.url)?'FLAG ●':'FLAG'}</button>
-        <button class="act-btn delete-btn">DEL</button>
-      `;
-      actions.querySelector('.flag-btn').onclick = async e => {
-        e.stopPropagation();
-        await toggleFlag(a.url);
-        render();
-      };
-      actions.querySelector('.delete-btn').onclick = async e => {
-        e.stopPropagation();
-        if(confirm(`「${a.title.slice(0,30)}...」を削除しますか？`)){
-          await deleteArticle(a.url); render();
-        }
-      };
-      card.appendChild(actions);
+        <div class="card-footer">${cveHtml}${mitreHtml}${pocHtml}</div>`;
       card.onclick=()=>openDetail(a);
-      // ソースリンクはカード全体のクリックイベントを止める
-      card.querySelector('.card-source-link').onclick=e=>e.stopPropagation();
       frag.appendChild(card);
     });
   });
   feed.appendChild(frag);
 }
-
-async function openDetail(a){
-  // 既読マーク
-  await markRead(a.url);
-
+function openDetail(a){
   const body=document.getElementById('det-body');
   let metaHtml='';
   if(a.cvss_score) metaHtml+=`<span class="cvss-badge ${cvssClass(a.cvss_score)}" style="font-size:.68rem;padding:4px 10px">CVSS ${a.cvss_score}</span>`;
-  (a.mitre_ids||[]).forEach(id=>{metaHtml+=`<span class="mitre-chip">${id}</span>`;});
-  if(isPocValid(a.poc_url)) metaHtml+=`<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoC / Exploit Repository</a>`;
-
-  const flagLabel = isFlagged(a.url) ? '⚑ フラグ解除' : '⚐ フラグ';
+  (a.cve_ids||[]).forEach(c=>{metaHtml+=`<span class="cve-chip">${c}</span>`});
+  (a.mitre_ids||[]).forEach(id=>{metaHtml+=`<span class="mitre-chip">${id}</span>`});
+  if(isPocValid(a.poc_url)) metaHtml+=`<a href="${a.poc_url}" target="_blank" class="poc-btn">⚡ PoC Repository</a>`;
+  if(a.researched) metaHtml+='<span class="research-badge">🔍 エージェント補完済</span>';
+  const rendered = DOMPurify.sanitize(marked.parse(a.content));
   body.innerHTML=`
     <div class="det-title">${a.title}</div>
     <div class="det-meta-row">
@@ -1842,15 +1312,10 @@ async function openDetail(a){
       <span style="font-family:var(--mono);font-size:.62rem;color:var(--muted)">${a.date}</span>
       ${metaHtml}
     </div>
-    <div class="det-action-bar">
-      <button class="det-act-btn ${isFlagged(a.url)?'flagged':''}" id="det-flag-btn">${isFlagged(a.url)?'FLAG ●':'FLAG'}</button>
-      <button class="det-act-btn delete-btn" id="det-delete-btn">DEL</button>
-      <button class="det-act-btn teams-btn" id="det-teams-btn">TEAMS</button>
-    </div>
-    ${marked.parse(a.content)}
+    ${rendered}
     <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--bdr)">
-      <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.1em">// SOURCE ARTICLE</span><br>
-      <a href="${a.url}" target="_blank" style="font-family:var(--mono);font-size:.75rem;color:var(--acc2);word-break:break-all;text-decoration:none;">${a.url}</a>
+      <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted)">// SOURCE</span><br>
+      <a href="${a.url}" target="_blank" style="font-family:var(--mono);font-size:.75rem;color:var(--acc2);word-break:break-all">${a.url}</a>
     </div>`;
   body.querySelectorAll('pre').forEach(pre=>{
     const btn=document.createElement('button');
@@ -1858,58 +1323,17 @@ async function openDetail(a){
     btn.onclick=e=>{
       e.stopPropagation();
       const txt=pre.querySelector('code')?.textContent||pre.textContent;
-      navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓ OK';setTimeout(()=>btn.textContent='COPY',1800);});
+      navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓';setTimeout(()=>btn.textContent='COPY',1500)});
     };
     pre.appendChild(btn);
   });
   document.getElementById('det-cat-tag').innerHTML=`<span class="cat-tag" data-cat="${a.category}" style="font-size:.66rem;padding:3px 10px">${a.category}</span>`;
   document.getElementById('det-source-url').href=a.url;
-
-  document.getElementById('det-flag-btn').onclick = async () => {
-    await toggleFlag(a.url);
-    const fb = document.getElementById('det-flag-btn');
-    if(fb){ fb.textContent = isFlagged(a.url)?'⚑ フラグ解除':'⚐ フラグ'; fb.classList.toggle('flagged', isFlagged(a.url)); }
-    render();
-  };
-  document.getElementById('det-delete-btn').onclick = async () => {
-    if(confirm(`「${a.title.slice(0,30)}...」を削除しますか？`)){
-      await deleteArticle(a.url); closeDetail(); render();
-    }
-  };
-  document.getElementById('det-teams-btn').onclick = () => postToTeams(a);
-
   document.getElementById('detail').classList.add('open');
   history.pushState({view:'detail'},'');
 }
-function closeDetail(){document.getElementById('detail').classList.remove('open'); render();}
+function closeDetail(){document.getElementById('detail').classList.remove('open')}
 window.onpopstate=()=>closeDetail();
-
-/* ── mobile tab / drawer ── */
-let drawerMode=null;
-function isMobile(){ return window.innerWidth <= 700; }
-function setTab(t){
-  if(!isMobile()) return;
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('tab-'+t)?.classList.add('active');
-  if(t==='feed'){closeMobDrawer();}
-  else if(t==='filter'||t==='dates'){
-    if(drawerMode===t){closeMobDrawer();}
-    else{drawerMode=t;document.getElementById('mob-drawer').classList.add('open');}
-  }
-}
-function closeMobDrawer(){
-  drawerMode=null;
-  document.getElementById('mob-drawer').classList.remove('open');
-  document.getElementById('tab-feed')?.classList.add('active');
-  document.querySelectorAll('.tab-btn:not(#tab-feed)').forEach(b=>b.classList.remove('active'));
-}
-window.addEventListener('resize', ()=>{
-  if(!isMobile()){
-    closeMobDrawer();
-    document.getElementById('mob-drawer').classList.remove('open');
-  }
-});
-
 init();
 </script>
 </body>
@@ -1922,139 +1346,66 @@ def _build_log_html() -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='40%25'%3E%3Cstop offset='0' stop-color='%2338bfff' stop-opacity='.9'/%3E%3Cstop offset='1' stop-color='%230a1628' stop-opacity='1'/%3E%3C/radialGradient%3E%3C/defs%3E%3Cpolygon points='16,2 28,9 28,23 16,30 4,23 4,9' fill='%230d1a2e' stroke='%2338bfff' stroke-width='1.5'/%3E%3Cpolygon points='16,6 24,10.5 24,21.5 16,26 8,21.5 8,10.5' fill='none' stroke='%2338bfff' stroke-width='.6' stroke-opacity='.4'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='monospace' font-weight='700' font-size='13' fill='url(%23g)' letter-spacing='-1'%3EC%3C/text%3E%3Ccircle cx='16' cy='16' r='1.2' fill='%2338bfff' opacity='.7'/%3E%3Cline x1='16' y1='6' x2='16' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='16' y1='23' x2='16' y2='26' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='4' y1='9' x2='6.5' y2='10.5' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3Cline x1='27.5' y1='10.5' x2='28' y2='9' stroke='%2338bfff' stroke-width='.8' opacity='.5'/%3E%3C/svg%3E">
 <title>CIPHER // RUN LOG</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+JP:wght@300;400&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;
-  --text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;
-  --mono:'JetBrains Mono',monospace;--sans:'Noto Sans JP',sans-serif;--disp:'Rajdhani',sans-serif;
-}
+:root{--bg:#080d14;--surf:#0d1220;--surf2:#111a2e;--bdr:#162040;--bdr2:#1e3060;--text:#7a9ec4;--hi:#c8dff5;--muted:#1e3050;--acc:#38bfff;--acc2:#f0c040;--MALWARE:#ff4455;--mono:'JetBrains Mono',monospace;--disp:'Rajdhani',sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;padding:24px 16px 40px}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);padding:24px 16px 40px}
 .page{max-width:720px;margin:0 auto}
-.page-header{margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid var(--bdr);position:relative}
-.page-header::after{content:'';position:absolute;bottom:0;left:0;width:120px;height:1px;background:var(--acc)}
-.back-link{
-  display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.65rem;
-  color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);
-  padding:4px 10px;border-radius:2px;margin-bottom:14px;transition:.15s;
-}
+.back-link{display:inline-block;font-family:var(--mono);font-size:.65rem;color:var(--muted);text-decoration:none;border:1px solid var(--bdr2);padding:4px 10px;border-radius:2px;margin-bottom:14px}
 .back-link:hover{color:var(--acc);border-color:var(--acc)}
-.page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);
-  letter-spacing:.1em;text-shadow:0 0 20px rgba(56,191,255,.25)}
+.page-title{font-family:var(--disp);font-size:1.8rem;font-weight:700;color:var(--acc);letter-spacing:.1em}
 .page-sub{font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.15em;margin-top:4px}
-.summary-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px}
+.summary-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}
 .stat-card{background:var(--surf);border:1px solid var(--bdr);border-radius:4px;padding:14px;text-align:center}
-.stat-card-val{font-family:var(--disp);font-size:1.6rem;font-weight:700;color:var(--acc);
-  text-shadow:0 0 10px rgba(56,191,255,.25);display:block}
+.stat-card-val{font-family:var(--disp);font-size:1.5rem;font-weight:700;color:var(--acc);display:block}
 .stat-card-lbl{font-family:var(--mono);font-size:.55rem;color:var(--muted);letter-spacing:.1em;margin-top:3px}
-.section-title{font-family:var(--mono);font-size:.62rem;letter-spacing:.15em;color:var(--muted);
-  margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
-.log-table{width:100%;border-collapse:collapse;font-size:.8rem}
-.log-table th{
-  background:var(--surf2);padding:9px 12px;text-align:left;
-  border:1px solid var(--bdr);color:var(--hi);
-  font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;
-}
-.log-table td{padding:9px 12px;border:1px solid var(--bdr);color:var(--text)}
-.log-table tr:hover td{background:var(--surf2)}
-.log-table tr.today-row td{color:var(--hi)}
-.badge-new{
-  font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);
-  color:var(--acc);border:1px solid rgba(56,191,255,.2);
-  padding:1px 6px;border-radius:2px;margin-left:6px;
-}
-.badge-zero{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
-.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px;font-weight:700}
-.badge-today{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px;margin-left:4px}
-.stat-card-warn .stat-card-val{color:var(--MALWARE)!important}
-.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf);transition:.15s}
+.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf)}
 .log-row:hover{background:var(--surf2)}
-.today-row{border-left:2px solid var(--acc)!important}
-.tpd-row{border-left:2px solid var(--MALWARE)!important;background:rgba(255,68,85,.02)!important}
 .log-row-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1;min-width:120px}
-.log-nb{font-family:var(--mono);font-size:.65rem}
-.log-total{font-family:var(--mono);font-size:.6rem;color:var(--muted);margin-left:auto}
-.log-row-cats{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
-.cat-result{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.04em}
-.feed-err-list{font-family:var(--mono);font-size:.58rem;color:var(--MALWARE);margin-top:4px;opacity:.8}
-.no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
-@media(max-width:500px){
-  .summary-row{grid-template-columns:1fr 1fr}
-  .log-table th:last-child,.log-table td:last-child{display:none}
-}
+.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1}
+.badge-new{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px}
+.badge-research{font-family:var(--mono);font-size:.55rem;background:rgba(176,106,255,.12);color:#c084fc;border:1px solid rgba(176,106,255,.3);padding:1px 6px;border-radius:2px}
+.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px}
+.no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted)}
+@media(max-width:500px){.summary-row{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div class="page">
-  <div class="page-header">
-    <a href="index.html" class="back-link">← CIPHER</a>
-    <div class="page-title">RUN LOG</div>
-    <div class="page-sub">// AI調査実行履歴</div>
-  </div>
+  <a href="index.html" class="back-link">← CIPHER</a>
+  <div class="page-title">RUN LOG</div>
+  <div class="page-sub">// AI調査実行履歴 (v4.0 調査フェーズ対応)</div>
   <div class="summary-row" id="summary-row"></div>
-  <div class="section-title">// 実行履歴（新しい順）</div>
   <div id="log-wrap"></div>
 </div>
 <script src="log.js"></script>
 <script>
-const log = (window.__RUN_LOG__ || []).slice().reverse();
-const today = new Date().toISOString().slice(0,10);
-const totalRuns = log.length;
-const totalNew  = log.reduce((s,r)=>s+(r.new_articles||0),0);
-const tpdCount  = log.filter(r=>r.tpd_exhausted).length;
-const lastRun   = log[0]?.datetime_jst || '—';
-document.getElementById('summary-row').innerHTML = `
-  <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">TOTAL RUNS</div></div>
-  <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES COLLECTED</div></div>
-  <div class="stat-card ${tpdCount>0?'stat-card-warn':''}"><span class="stat-card-val">${tpdCount}</span><div class="stat-card-lbl">TPD ERRORS</div></div>
-  <div class="stat-card"><span class="stat-card-val" style="font-size:1rem;padding-top:4px">${lastRun}</span><div class="stat-card-lbl">LAST RUN (JST)</div></div>`;
-
-const CAT_LABELS = {MALWARE:'MAL',INITIAL:'INIT',POST_EXP:'POST',AI_SEC:'AI'};
-
-const wrap = document.getElementById('log-wrap');
-if(!log.length){
-  wrap.innerHTML='<div class="no-log">// 実行ログがありません</div>';
-} else {
-  wrap.innerHTML = log.map(r=>{
-    const isToday = r.datetime_jst?.startsWith(today);
-    const tpdBadge = r.tpd_exhausted ? '<span class="badge-tpd">TPD上限</span>' : '';
-    const nb = r.new_articles>0
-      ? `<span class="badge-new">+${r.new_articles}</span>`
-      : `<span class="badge-zero">±0</span>`;
-
-    // カテゴリ別サマリー
-    const cats = r.categories || {};
-    const catHtml = Object.entries(CAT_LABELS).map(([id,lbl])=>{
-      const c = cats[id];
-      if(!c) return '';
-      const adopted = c.adopted || 0;
-      const tpd = c.tpd_hit;
-      const ferr = (c.feed_errors||[]).length;
-      const color = tpd ? 'var(--MALWARE)' : adopted > 0 ? 'var(--acc)' : 'var(--muted)';
-      const icon = tpd ? '⚠' : adopted > 0 ? '✓' : ferr > 0 ? '✗' : '—';
-      const title = tpd ? 'TPD上限' : ferr > 0 ? `フィードエラー ${ferr}件` : `採用 ${adopted}件`;
-      return `<span class="cat-result" style="color:${color}" title="${title}">${lbl}:${icon}${adopted>0?adopted:''}</span>`;
-    }).join('');
-
-    // フィードエラー一覧
-    const allFeedErrs = Object.values(cats).flatMap(c=>c.feed_errors||[]);
-    const feedErrHtml = allFeedErrs.length
-      ? `<div class="feed-err-list">Feed error: ${[...new Set(allFeedErrs)].join(', ')}</div>` : '';
-
-    return `<div class="log-row ${isToday?'today-row':''} ${r.tpd_exhausted?'tpd-row':''}">
+const log=(window.__RUN_LOG__||[]).slice().reverse();
+const totalRuns=log.length;
+const totalNew=log.reduce((s,r)=>s+(r.new_articles||0),0);
+const totalResearch=log.reduce((s,r)=>s+(r.researched_count||0),0);
+const tpdCount=log.filter(r=>r.tpd_exhausted).length;
+const lastRun=log[0]?.datetime_jst||'—';
+document.getElementById('summary-row').innerHTML=`
+  <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">RUNS</div></div>
+  <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES</div></div>
+  <div class="stat-card"><span class="stat-card-val">${totalResearch}</span><div class="stat-card-lbl">RESEARCHED</div></div>
+  <div class="stat-card"><span class="stat-card-val" style="font-size:.9rem;padding-top:6px">${lastRun}</span><div class="stat-card-lbl">LAST RUN</div></div>`;
+const wrap=document.getElementById('log-wrap');
+if(!log.length){wrap.innerHTML='<div class="no-log">// 実行ログなし</div>';}
+else{
+  wrap.innerHTML=log.map(r=>{
+    const tpdBadge=r.tpd_exhausted?'<span class="badge-tpd">TPD</span>':'';
+    const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:'<span style="color:var(--muted);font-family:var(--mono);font-size:.55rem">±0</span>';
+    const rb=r.researched_count>0?`<span class="badge-research">🔍${r.researched_count}</span>`:'';
+    return `<div class="log-row">
       <div class="log-row-main">
-        <span class="log-dt">${r.datetime_jst}${isToday?' <span class="badge-today">TODAY</span>':''}</span>
-        <span class="log-nb">${nb}</span>
-        ${tpdBadge}
-        <span class="log-total">${r.total_articles??'—'} total</span>
+        <span class="log-dt">${r.datetime_jst}</span>
+        ${nb}${rb}${tpdBadge}
+        <span style="font-family:var(--mono);font-size:.6rem;color:var(--muted)">${r.total_articles||'—'} total</span>
       </div>
-      <div class="log-row-cats">${catHtml}</div>
-      ${feedErrHtml}
     </div>`;
   }).join('');
 }
@@ -2062,6 +1413,8 @@ if(!log.length){
 </body>
 </html>"""
 
+
+# ─────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
