@@ -211,5 +211,44 @@
       }
     },
     "feed_errors": []
+  },
+  {
+    "datetime_jst": "2026-04-10 11:58",
+    "new_articles": 0,
+    "total_articles": 54,
+    "tpd_exhausted": true,
+    "categories": {
+      "MALWARE": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 1,
+        "tpd_hit": true,
+        "feed_errors": [
+          "cybersecuritynews.com"
+        ]
+      },
+      "INITIAL": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "POST_EXP": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      },
+      "AI_SEC": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 0,
+        "tpd_hit": true,
+        "feed_errors": []
+      }
+    },
+    "feed_errors": []
   }
 ]
