@@ -514,8 +514,24 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
     new_articles: list[dict] = []
     seen_urls         = set(existing_urls)
     seen_title_hashes = set()
+    tpd_exhausted     = False
+
+    run_stats = {
+        "tpd_exhausted": False,
+        "feed_errors":   [],
+        "categories":    {}
+    }
 
     for cat_id, feeds in RSS_FEEDS.items():
+        cat_stats = {"adopted": 0, "skipped_dup": 0, "skipped_low": 0,
+                     "tpd_hit": False, "feed_errors": []}
+        run_stats["categories"][cat_id] = cat_stats
+
+        if tpd_exhausted:
+            print(f"  [{cat_id}] TPD上限のためスキップ")
+            cat_stats["tpd_hit"] = True
+            continue
+
         print(f"\n[{cat_id}] ───────────────────────")
         cat_count = 0
 
