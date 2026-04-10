@@ -16,6 +16,12 @@ try:
 except ImportError:
     _TAVILY_AVAILABLE = False
 
+try:
+    import google.generativeai as genai
+    _GEMINI_AVAILABLE = True
+except ImportError:
+    _GEMINI_AVAILABLE = False
+
 JST = timezone(timedelta(hours=9))
 def now_jst():
     return datetime.now(JST)
@@ -30,6 +36,13 @@ groq_client = Groq(api_key=GROQ_KEY)
 
 TAVILY_KEY  = os.getenv("TAVILY_API_KEY")
 tavily_client = TavilyClient(api_key=TAVILY_KEY) if (_TAVILY_AVAILABLE and TAVILY_KEY) else None
+
+GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
+if _GEMINI_AVAILABLE and GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+    gemini_model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+else:
+    gemini_model = None
 
 MASTER_DATA      = "all_articles.json"
 OUTPUT_HTML      = "index.html"
@@ -145,9 +158,114 @@ AI/LLM ATTACK FOCUS (broad coverage — any attack technique targeting AI/LLM sy
 }
 
 def build_prompt(content: str, category: str) -> str:
+    """後方互換用ラッパー — Geminiなしの場合はこちらを使用"""
+    return build_report_prompt(content, category)
+
+def build_screening_prompt(content: str, category: str) -> str:
+    """Groq用: 新規性スコアリング + skip判定のみ（軽量・高速）"""
+    ctx = CATEGORY_CONTEXT.get(category, "")
+    return f"""あなたはオフェンシブセキュリティの専門家です。
+以下の記事を評価し、JSONのみを出力してください。説明・マークダウン不要。
+{ctx}
+新規性スコアを1〜5で評価:
+  5 = 新規CVE・新技術・オリジナルリサーチ・新バイパス手法
+  4 = 既知技術の有意な新バリアント（新ターゲット・新回避手法・新ツール）
+  3 = 既知手法だが具体的な適用事例として価値あり
+  2 = 既知手法の概説、新情報なし
+  1 = 教育コンテンツ・ベンダーマーケティング・技術的深度なし
+
+選定基準:
+- 「攻撃者がこれを使って何ができるか」が具体的か
+- テスターがラボで試せる手順・ツールが推測できるか
+
+スコア1〜2 → {{"skip": true, "reason": "除外理由（日本語）"}}
+スコア3〜5 → {{"skip": false, "score": <数値>, "title": "30字以内の日本語タイトル", "poc_url": "GitHubURLか空文字", "cvss_score": "数値か空文字", "mitre_ids": ["T1566.001"], "summary_points": ["要点1（100字以内）", "要点2", "要点3"]}}
+
+例外: 以下があればスコア2でも skip:false にすること:
+- 未パッチ・ゼロデイPoCの公開
+- 新CVEに対する機能するExploit公開
+- ITW悪用確認
+
+SOURCE:
+{{content[:3000]}}"""
+
+def build_report_prompt(content: str, category: str) -> str:
+    """Gemini用: CoT強化・詳細レポート生成"""
     ctx = CATEGORY_CONTEXT.get(category, "")
     return f"""あなたはオフェンシブセキュリティの専門家（レッドチームオペレーター歴15年）です。
 社内のレッドチームテスター向けに、攻撃者視点で攻撃を再現するための内部技術レポートを作成してください。
+
+対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
+{ctx}
+
+━━━ STEP 1: 攻撃者として考える（出力不要） ━━━
+以下を自問してから書き始めること（思考過程は出力しない）:
+1. この脆弱性/手法を使って攻撃者は何を達成できるか？
+2. 攻撃成立に必要な前提条件は何か？（権限・アクセス・バージョン）
+3. 既存の検知・防御はどこで機能し、どこで機能しないか？
+4. ラボで再現するために最低限必要な手順は何か？
+5. 記事が言及していない実装の詳細で、専門知識から補完できるものは何か？
+
+━━━ STEP 2: レポート作成 ━━━
+
+【言語ルール】
+- 全セクションを日本語で記述
+- ツール名・CVE ID・APIコール・コマンドのみ英語維持
+
+【重要】全セクションを最後まで書き切ること。途中で切らないこと。
+
+[## 概要]
+1〜2文の核心サマリー:「〇〇が報告された。重要なのは〜という点である」形式
+技術的要点（箇条書き3〜5点）:各点は「何が・どのように・なぜ危険か」を1文で
+**🆕 新規性・差異化ポイント:**（太字・独立段落）従来手法との具体的な差異
+属性情報: APT / Malware / CVE / IoC（不明は「記載なし」）
+
+[## 脆弱性・脅威の技術的メカニズム]
+- 脆弱なコンポーネント・ロジックと悪用の仕組みを技術的に説明
+- APIコール・メモリ操作・プロトコルフィールド・コードパスを具体的に記述
+- CVEの場合: 脆弱なコードパス・トリガー条件
+- マルウェアの場合: ロード→復号→実行の内部動作を段階的に説明
+- 最低500文字。「高度な」「巧妙な」等の抽象表現は禁止
+
+[## 攻撃再現ガイド]
+■ 前提条件・環境
+（OS・権限・必要ツール・攻撃対象の状態）
+
+■ 攻撃フロー
+フェーズごとに:
+  【操作】何を・どこで・どのように
+  【目的】攻撃上なぜ必要か
+  【結果】何が起きるか・何が得られるか
+  ※記事にない部分は知識から補完し [推測] を付記
+
+■ 実装・設定の詳細
+記事が言及した具体的要素（CLSID・APIコール・レジストリキー・ファイルパス等）の
+作り方・設定方法をコードブロック付きで説明
+
+[## IoC・痕跡情報]
+ハッシュ値・C2・URI・User-Agent・証明書等。なければ「記事中に記載なし」
+
+[## MITRE ATT&CK マッピング]
+記事の手法に正確に対応するIDを選ぶこと（サブテクニックIDと説明を付ける）
+
+[## 検知・防御策]
+**防御策**（最低3項目・具体的な設定変更形式）
+**検知策**: 検知ポイント + Sigma/KQL/SPL クエリ（具体的なIoCを含む）
+
+OUTPUT: ONLY valid JSON. No markdown fences. Use \n for newlines in report field.
+{{"title":"30字以内日本語タイトル","summary_points":["要点1","要点2","要点3"],"poc_url":"GitHubURLか空文字","cvss_score":"数値か空文字","mitre_ids":["T1566.001"],"report":"## 概要\n..."}}
+
+SOURCE ARTICLE:
+{{content[:6000]}}"""
+
+def build_report_prompt_legacy(content: str, category: str) -> str:
+    """Gemini未使用時のフォールバック（元のプロンプト）"""
+    ctx = CATEGORY_CONTEXT.get(category, "")
+    return f"""あなたはオフェンシブセキュリティの専門家（レッドチームオペレーター歴15年）です。
+社内のレッドチームテスター向けに、攻撃者視点で攻撃を再現するための内部技術レポートを作成してください。
+
+対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
+{ctx}
 
 対象読者: 明日ラボ環境でこの攻撃を試みるレッドチームテスター。曖昧な記述は一切不要。
 {ctx}
@@ -338,6 +456,31 @@ def validate_result(res: dict) -> bool:
     pts = res.get("summary_points", [])
     res["summary_points"] = [p[:100] for p in pts if p][:4]
     return True
+
+
+# ─────────────────────────────────────────────
+# Gemini呼び出し（詳細レポート生成）
+# ─────────────────────────────────────────────
+def call_gemini(prompt: str) -> dict | None:
+    """Gemini 2.5 Flash でレポートを生成する"""
+    if not gemini_model:
+        return None
+    try:
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                temperature=0.2,
+                max_output_tokens=4096,
+            )
+        )
+        raw = response.text
+        result = extract_json(raw)
+        if result and validate_result(result):
+            return result
+        return None
+    except Exception as e:
+        print(f"    ✗ [Gemini] {e}")
+        return None
 
 # ─────────────────────────────────────────────
 # LLM呼び出し（モデルフォールバック付きリトライ）
@@ -632,16 +775,46 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
 
                 print(f"  → {url[:70]}")
 
-                prompt = build_prompt(content, cat_id)
-                result = call_llm(prompt)
+                # ── フェーズ1: Groqでスクリーニング ──
+                screening_prompt = build_screening_prompt(content, cat_id)
+                screening = call_llm(screening_prompt)
 
-                # 両モデルともTPD上限に達したら残りのカテゴリをスキップ
+                # TPD上限チェック
                 if len(_tpd_hit_models) >= 2:
                     tpd_exhausted = True
                     run_stats["tpd_exhausted"] = True
                     cat_stats["tpd_hit"] = True
                     print("  !! 両モデルTPD上限 — 残りの処理をスキップ")
                     break
+
+                # skipまたはスクリーニング失敗
+                if screening is None or screening.get("skip"):
+                    cat_stats["skipped_low"] += 1
+                    continue
+
+                # ── フェーズ2: レポート生成 ──
+                if gemini_model:
+                    # Geminiで高品質レポート生成
+                    report_prompt = build_report_prompt(content, cat_id)
+                    result = call_gemini(report_prompt)
+                    if result is None:
+                        # Gemini失敗時はGroqでフォールバック
+                        print(f"    Gemini失敗 → Groqでフォールバック")
+                        report_prompt_fb = build_report_prompt_legacy(content, cat_id)
+                        result = call_llm(report_prompt_fb)
+                    else:
+                        print(f"    ✓ [Gemini] レポート生成完了")
+                    # スクリーニング結果でフィールド補完
+                    if result:
+                        result.setdefault("title", screening.get("title", ""))
+                        result.setdefault("poc_url", screening.get("poc_url", ""))
+                        result.setdefault("cvss_score", screening.get("cvss_score", ""))
+                        result.setdefault("mitre_ids", screening.get("mitre_ids", []))
+                        result.setdefault("summary_points", screening.get("summary_points", []))
+                else:
+                    # Gemini未設定: Groqで直接レポート生成（後方互換）
+                    report_prompt = build_report_prompt_legacy(content, cat_id)
+                    result = call_llm(report_prompt)
 
                 if result is None:
                     cat_stats["skipped_low"] += 1
@@ -696,14 +869,30 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
                         continue
                     seen_urls.add(url)
                     print(f"  → {url[:70]}")
-                    prompt = build_prompt(content, cat_id)
-                    result = call_llm(prompt)
+                    # フェーズ1: Groqでスクリーニング
+                    screening = call_llm(build_screening_prompt(content, cat_id))
                     if len(_tpd_hit_models) >= 2:
                         tpd_exhausted = True
                         run_stats["tpd_exhausted"] = True
                         cat_stats["tpd_hit"] = True
                         print("  !! 両モデルTPD上限 — Tavilyもスキップ")
                         break
+                    if screening is None or screening.get("skip"):
+                        cat_stats["skipped_low"] += 1
+                        continue
+                    # フェーズ2: Geminiでレポート生成
+                    if gemini_model:
+                        result = call_gemini(build_report_prompt(content, cat_id))
+                        if result is None:
+                            result = call_llm(build_report_prompt_legacy(content, cat_id))
+                        elif result:
+                            result.setdefault("title", screening.get("title", ""))
+                            result.setdefault("poc_url", screening.get("poc_url", ""))
+                            result.setdefault("cvss_score", screening.get("cvss_score", ""))
+                            result.setdefault("mitre_ids", screening.get("mitre_ids", []))
+                            result.setdefault("summary_points", screening.get("summary_points", []))
+                    else:
+                        result = call_llm(build_report_prompt_legacy(content, cat_id))
                     if result is None:
                         cat_stats["skipped_low"] += 1
                         continue
