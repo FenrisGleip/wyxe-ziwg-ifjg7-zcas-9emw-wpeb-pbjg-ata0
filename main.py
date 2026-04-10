@@ -49,7 +49,7 @@ tavily_client = TavilyClient(api_key=TAVILY_KEY) if (_TAVILY_AVAILABLE and TAVIL
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 if _GEMINI_AVAILABLE and GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+    gemini_model = genai.GenerativeModel("gemini-2.5-flash-lite")
     print("[INIT] ✓ Gemini 2.5 Flash 利用可能")
 else:
     gemini_model = None
@@ -75,7 +75,7 @@ MAX_DB_ENTRIES  = 200
 MIN_REPORT_LEN  = 600   # さらに緩和: Gemini主体なら品質は担保されるが、短い速報も許容
 MIN_SOURCE_LEN  = 400
 MAX_RETRIES     = 1     # 3 → 1: 品質不足時のリトライは TPD を無駄食いするので廃止
-SLEEP_BETWEEN_REQ = 1.5
+SLEEP_BETWEEN_REQ = 6.0
 
 # Gemini をレポート生成の主役に。Groq はスクリーニング専用 (軽量・高速)
 PRIMARY_MODEL  = "llama-3.3-70b-versatile"  # 安定モデルに切替
@@ -128,7 +128,7 @@ TAVILY_QUERIES = {
 }
 TAVILY_MAX_RESULTS = 3
 MAX_ITEMS_PER_FEED = 5
-MAX_PER_CATEGORY   = 10
+MAX_PER_CATEGORY   = 4
 
 # ─────────────────────────────────────────────
 # プロンプト (カテゴリ文脈)
@@ -373,7 +373,7 @@ def call_gemini(prompt: str) -> dict | None:
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.2,
-                    max_output_tokens=8192,  # 4096 → 8192: 日本語レポート途中切れ対策
+                    max_output_tokens=4096,
                 )
             )
             raw = response.text
