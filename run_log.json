@@ -128,5 +128,48 @@
     "datetime_jst": "2026-04-09 07:15",
     "new_articles": 1,
     "total_articles": 51
+  },
+  {
+    "datetime_jst": "2026-04-10 11:08",
+    "new_articles": 3,
+    "total_articles": 54,
+    "tpd_exhausted": true,
+    "categories": {
+      "MALWARE": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 12,
+        "tpd_hit": false,
+        "feed_errors": [
+          "unit42.paloaltonetworks.com",
+          "www.welivesecurity.com"
+        ]
+      },
+      "INITIAL": {
+        "adopted": 3,
+        "skipped_dup": 2,
+        "skipped_low": 19,
+        "tpd_hit": false,
+        "feed_errors": []
+      },
+      "POST_EXP": {
+        "adopted": 0,
+        "skipped_dup": 0,
+        "skipped_low": 8,
+        "tpd_hit": false,
+        "feed_errors": [
+          "www.cyderes.com",
+          "www.trustedsec.com"
+        ]
+      },
+      "AI_SEC": {
+        "adopted": 0,
+        "skipped_dup": 6,
+        "skipped_low": 12,
+        "tpd_hit": true,
+        "feed_errors": []
+      }
+    },
+    "feed_errors": []
   }
 ]

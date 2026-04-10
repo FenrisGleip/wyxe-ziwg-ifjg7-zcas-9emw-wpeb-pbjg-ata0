@@ -49,6 +49,20 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:1
   padding:1px 6px;border-radius:2px;margin-left:6px;
 }
 .badge-zero{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
+.badge-tpd{font-family:var(--mono);font-size:.55rem;background:rgba(255,68,85,.1);color:var(--MALWARE);border:1px solid rgba(255,68,85,.3);padding:1px 6px;border-radius:2px;font-weight:700}
+.badge-today{font-family:var(--mono);font-size:.55rem;background:rgba(56,191,255,.1);color:var(--acc);border:1px solid rgba(56,191,255,.2);padding:1px 6px;border-radius:2px;margin-left:4px}
+.stat-card-warn .stat-card-val{color:var(--MALWARE)!important}
+.log-row{border:1px solid var(--bdr);border-radius:3px;padding:10px 14px;margin-bottom:6px;background:var(--surf);transition:.15s}
+.log-row:hover{background:var(--surf2)}
+.today-row{border-left:2px solid var(--acc)!important}
+.tpd-row{border-left:2px solid var(--MALWARE)!important;background:rgba(255,68,85,.02)!important}
+.log-row-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.log-dt{font-family:var(--mono);font-size:.72rem;color:var(--hi);flex:1;min-width:120px}
+.log-nb{font-family:var(--mono);font-size:.65rem}
+.log-total{font-family:var(--mono);font-size:.6rem;color:var(--muted);margin-left:auto}
+.log-row-cats{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+.cat-result{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.04em}
+.feed-err-list{font-family:var(--mono);font-size:.58rem;color:var(--MALWARE);margin-top:4px;opacity:.8}
 .no-log{text-align:center;padding:60px 20px;font-family:var(--mono);color:var(--muted);font-size:.72rem}
 @media(max-width:500px){
   .summary-row{grid-template-columns:1fr 1fr}
@@ -73,25 +87,57 @@ const log = (window.__RUN_LOG__ || []).slice().reverse();
 const today = new Date().toISOString().slice(0,10);
 const totalRuns = log.length;
 const totalNew  = log.reduce((s,r)=>s+(r.new_articles||0),0);
+const tpdCount  = log.filter(r=>r.tpd_exhausted).length;
 const lastRun   = log[0]?.datetime_jst || '—';
 document.getElementById('summary-row').innerHTML = `
   <div class="stat-card"><span class="stat-card-val">${totalRuns}</span><div class="stat-card-lbl">TOTAL RUNS</div></div>
   <div class="stat-card"><span class="stat-card-val">${totalNew}</span><div class="stat-card-lbl">ARTICLES COLLECTED</div></div>
+  <div class="stat-card ${tpdCount>0?'stat-card-warn':''}"><span class="stat-card-val">${tpdCount}</span><div class="stat-card-lbl">TPD ERRORS</div></div>
   <div class="stat-card"><span class="stat-card-val" style="font-size:1rem;padding-top:4px">${lastRun}</span><div class="stat-card-lbl">LAST RUN (JST)</div></div>`;
+
+const CAT_LABELS = {MALWARE:'MAL',INITIAL:'INIT',POST_EXP:'POST',AI_SEC:'AI'};
+
 const wrap = document.getElementById('log-wrap');
 if(!log.length){
   wrap.innerHTML='<div class="no-log">// 実行ログがありません</div>';
 } else {
-  wrap.innerHTML = `<table class="log-table">
-    <thead><tr><th>実行日時 (JST)</th><th>新規取得</th><th>累計件数</th></tr></thead>
-    <tbody>${log.map(r=>{
-      const isToday=r.datetime_jst?.startsWith(today);
-      const nb=r.new_articles>0?`<span class="badge-new">+${r.new_articles}</span>`:`<span class="badge-zero">±0</span>`;
-      return `<tr class="${isToday?'today-row':''}">
-        <td>${r.datetime_jst}${isToday?'<span class="badge-new" style="margin-left:6px">TODAY</span>':''}</td>
-        <td>${nb}</td><td>${r.total_articles??'—'}</td></tr>`;
-    }).join('')}</tbody>
-  </table>`;
+  wrap.innerHTML = log.map(r=>{
+    const isToday = r.datetime_jst?.startsWith(today);
+    const tpdBadge = r.tpd_exhausted ? '<span class="badge-tpd">TPD上限</span>' : '';
+    const nb = r.new_articles>0
+      ? `<span class="badge-new">+${r.new_articles}</span>`
+      : `<span class="badge-zero">±0</span>`;
+
+    // カテゴリ別サマリー
+    const cats = r.categories || {};
+    const catHtml = Object.entries(CAT_LABELS).map(([id,lbl])=>{
+      const c = cats[id];
+      if(!c) return '';
+      const adopted = c.adopted || 0;
+      const tpd = c.tpd_hit;
+      const ferr = (c.feed_errors||[]).length;
+      const color = tpd ? 'var(--MALWARE)' : adopted > 0 ? 'var(--acc)' : 'var(--muted)';
+      const icon = tpd ? '⚠' : adopted > 0 ? '✓' : ferr > 0 ? '✗' : '—';
+      const title = tpd ? 'TPD上限' : ferr > 0 ? `フィードエラー ${ferr}件` : `採用 ${adopted}件`;
+      return `<span class="cat-result" style="color:${color}" title="${title}">${lbl}:${icon}${adopted>0?adopted:''}</span>`;
+    }).join('');
+
+    // フィードエラー一覧
+    const allFeedErrs = Object.values(cats).flatMap(c=>c.feed_errors||[]);
+    const feedErrHtml = allFeedErrs.length
+      ? `<div class="feed-err-list">Feed error: ${[...new Set(allFeedErrs)].join(', ')}</div>` : '';
+
+    return `<div class="log-row ${isToday?'today-row':''} ${r.tpd_exhausted?'tpd-row':''}">
+      <div class="log-row-main">
+        <span class="log-dt">${r.datetime_jst}${isToday?' <span class="badge-today">TODAY</span>':''}</span>
+        <span class="log-nb">${nb}</span>
+        ${tpdBadge}
+        <span class="log-total">${r.total_articles??'—'} total</span>
+      </div>
+      <div class="log-row-cats">${catHtml}</div>
+      ${feedErrHtml}
+    </div>`;
+  }).join('');
 }
 </script>
 </body>

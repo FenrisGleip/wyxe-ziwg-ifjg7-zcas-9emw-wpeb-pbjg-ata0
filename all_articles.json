@@ -1,5 +1,59 @@
 [
   {
+    "date": "2026-04-10",
+    "category": "INITIAL",
+    "title": "Adobe Readerゼロデイ脆弱性を利用した攻撃",
+    "summary_points": [
+      "Adobe Readerのゼロデイ脆弱性が報告され、攻撃者がそれを利用して情報を盗み出す攻撃を行った。",
+      "攻撃者は、Adobe ReaderのJavaScriptエンジンの一部を悪用するゼロデイ脆弱性を利用した。",
+      "この脆弱性は、最新版のAdobe Readerで動作することが確認されている。"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1566.001",
+      "T1059.001"
+    ],
+    "content": "## 概要\n\nAdobe Readerのゼロデイ脆弱性が報告され、攻撃者がそれを利用して情報を盗み出す攻撃を行った。重要なのは、この脆弱性が最新版のAdobe Readerで動作することが確認されている点である。\n\n技術的要点:\n- Adobe ReaderのJavaScriptエンジンの一部を悪用するゼロデイ脆弱性が利用された\n- 「util.readFileIntoStream()」APIを利用してローカルファイルを読み取り、機密情報を収集した\n- 「RSS.addFeed()」を呼び出して盗んだデータをリモートサーバーに送信し、さらに悪意のあるJavaScriptを受け取った\n- 攻撃者は、被害者をプロファイルし、情報を盗み、特定の条件を満たす場合にさらに攻撃を仕掛けることができた\n\n**🆕 新規性・差異化ポイント:**\n従来のAdobe Readerの脆弱性とは異なり、JavaScriptエンジンを悪用する新しい手法が採用されている。[推測]\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: 記載なし\n- IoC: 188.214.34.20:34123\n\n## 脆弱性・脅威の技術的メカニズム\n\n攻撃者は、Adobe ReaderのJavaScriptエンジンの一部を悪用するゼロデイ脆弱性を利用して、情報を盗み出す攻撃を行った。この脆弱性は、最新版のAdobe Readerで動作することが確認されている。\n\n攻撃者は、「util.readFileIntoStream()」APIを利用してローカルファイルを読み取り、機密情報を収集した。そして、「RSS.addFeed()」を呼び出して盗んだデータをリモートサーバーに送信し、さらに悪意のあるJavaScriptを受け取った。これにより、攻撃者は、被害者をプロファイルし、情報を盗み、特定の条件を満たす場合にさらに攻撃を仕掛けることができた\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- Adobe Readerの最新版がインストールされたWindows環境\n- 攻撃対象の前提状態: 特定の条件を満たす必要がある\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 悪意のあるPDFファイルを準備する\n【目的】: Adobe Readerのゼロデイ脆弱性を悪用する\n【結果】: 情報を盗み出すことができる\n\n【フェーズ2: 実行】\n【操作】: 準備したPDFファイルをAdobe Readerで開く\n【目的】: 「util.readFileIntoStream()」APIを利用してローカルファイルを読み取り、機密情報を収集する\n【結果】: 盗んだデータをリモートサーバーに送信し、さらに悪意のあるJavaScriptを受け取る\n\n■ 具体的な実装・設定の詳細\n- 特定のCLSID: 記載なし\n- 特定のAPIコール: 「util.readFileIntoStream()」、「RSS.addFeed()」\n- 特定の設定値: 記載なし\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: 188.214.34.20:34123\n- 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n- T1566.001: Phishing: Spearphishing Attachment\n- T1059.001: Command and Scripting Interpreter: JavaScript\n\n## 検知・防御策\n\n**防御策**\n・ Adobe Readerを最新版に更新する\n・ 不要なファイルを削除する\n・ 怪しいファイルをダウンロードしない\n\n**検知策**\n①検知ポイント: EDRのプロセス生成ログ、Windowsイベントログ4688\n②Sigma/KQL:\n```\nprocess_creation | where process_name == \"Acrobat.exe\" | where command_line == \"util.readFileIntoStream()\"\n```\n",
+    "url": "https://securityaffairs.com/190558/hacking/malicious-pdf-reveals-active-adobe-reader-zero-day-in-the-wild.html"
+  },
+  {
+    "date": "2026-04-10",
+    "category": "INITIAL",
+    "title": "Contemporary Controls BASC 20Tの脆弱性悪用",
+    "summary_points": [
+      "Contemporary Controls BASC 20Tの脆弱性（CVE-2025-13926）が報告された。重要なのは、攻撃者がネットワークトラフィックをスニッフィングして得たデータを基にパケッ",
+      "脆弱なコンポーネントはBASControl20 3.1である。",
+      "攻撃者はこの脆弱性を悪用して、各コンポーネントの機能を列挙し、再構成、名前の変更、削除、ファイル転送、リモートプロシージャコールを行うことができる。",
+      "この脆弱性は、信頼されていない入力に対するセキュリティ上の決定に起因する。"
+    ],
+    "poc_url": "",
+    "cvss_score": "9.8",
+    "mitre_ids": [
+      "T1190",
+      "T1203"
+    ],
+    "content": "## 概要\nContemporary Controls BASC 20Tの脆弱性（CVE-2025-13926）が報告された。重要なのは、攻撃者がネットワークトラフィックをスニッフィングして得たデータを基にパケットを偽造し、任意の要求をBASC 20Tに送信できる点である。\n\n## 脆弱性・脅威の技術的メカニズム\n脆弱なコンポーネントはBASControl20 3.1である。攻撃者はこの脆弱性を悪用して、各コンポーネントの機能を列挙し、再構成、名前の変更、削除、ファイル転送、リモートプロシージャコールを行うことができる。この脆弱性は、信頼されていない入力に対するセキュリティ上の決定に起因する。具体的には、攻撃者はネットワークトラフィックをスニッフィングして得たデータを基にパケットを偽造し、任意の要求をBASC 20Tに送信することができる。\n\n## 攻撃再現ガイド\n■ 前提条件・環境\n- 必要なOS：なし\n- 必要なネットワーク構成：BASC 20Tが設置されたネットワーク\n- 必要なアカウント種別：なし\n- 必要な権限レベル：なし\n- 必要なツール：ネットワークスニッフィングツール、パケット偽造ツール\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】ネットワークトラフィックをスニッフィングして、BASC 20Tへの通信をキャプチャする。\n【目的】BASC 20Tへの通信を理解し、偽造パケットを作成するため。\n【結果】BASC 20Tへの通信がキャプチャされる。\n\n【フェーズ2: 実行】\n【操作】キャプチャした通信を基にパケットを偽造し、BASC 20Tに送信する。\n【目的】BASC 20Tを再構成、名前の変更、削除、ファイル転送、リモートプロシージャコールを行うため。\n【結果】BASC 20Tが偽造パケットを受信し、攻撃者の要求に従う。\n\n## IoC・痕跡情報\n- ハッシュ値：なし\n- C2ドメイン・IP：なし\n- 特徴的なパターン：BASC 20Tへの偽造パケット\n\n## MITRE ATT&CK マッピング\n- T1190：Exploit Public-Facing Application\n- T1203：Exploit Software Vulnerability\n\n## 検知・防御策\n**防御策**\n・ネットワークをセグメント化し、BASC 20Tをインターネットからアクセスできないようにする。\n・ファイアウォールを使用して、BASC 20Tへのアクセスを制限する。\n・VPNを使用して、BASC 20Tへのアクセスを暗号化する。\n\n**検知策**\n①検知ポイント：ネットワークトラフィックログ、BASC 20Tのログ\n②Sigma/KQL:\n```\ntitle: BASC 20T Exploit\nstatus: medium\nservices:\n  - network\nlogsource:\n  - network\nfilter:\n  - protocol: tcp\n  - src_ip: $attacker_ip\n  - dst_ip: $basc20t_ip\n  - dst_port: 80\n  - packet_data: $packet_data\n```",
+    "url": "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-01"
+  },
+  {
+    "date": "2026-04-10",
+    "category": "INITIAL",
+    "title": "Ivanti Endpoint Manager Mobileのコードインジェクション脆弱性が悪用された事例",
+    "summary_points": [
+      "Ivanti Endpoint Manager Mobile (EPMM) のコードインジェクション脆弱性（CVE-2026-1340）が悪用されている",
+      "この脆弱性は攻撃者にとって重要な攻撃ベクトルとなる",
+      "早急なパッチ適用が推奨されている"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1068"
+    ],
+    "content": "## 概要\nIvanti Endpoint Manager Mobile (EPMM) のコードインジェクション脆弱性（CVE-2026-1340）が悪用されている。重要なのは、この脆弱性が攻撃者にとって重要な攻撃ベクトルとなる点である。\n\n技術的要点:\n- CVE-2026-1340はIvanti EPMMにおけるコードインジェクション脆弱性である\n- 攻撃者はこの脆弱性を悪用して、任意のコードを実行可能である\n- 早急なパッチ適用が推奨されている\n\n**🆕 新規性・差異化ポイント:**\nこの脆弱性は、Ivanti EPMMに特有のコードインジェクション脆弱性であり、悪用されると攻撃者は任意のコードを実行可能である。[推測]\n\n属性情報:\n- APT: 記載なし\n- Malware: 記載なし\n- CVE: CVE-2026-1340\n- IoC: 記載なし\n\n## 脆弱性・脅威の技術的メカニズム\nCVE-2026-1340は、Ivanti Endpoint Manager Mobile (EPMM)におけるコードインジェクション脆弱性である。この脆弱性は、攻撃者がEPMMに任意のコードを注入し、実行することを可能にする。\n\n## 攻撃再現ガイド\n\n■ 前提条件・環境\n- 必要なOS: 記載なし\n- 必要なツール・サービス・外部リソース: 記載なし\n- 攻撃対象の前提状態: Ivanti EPMMがインストールされ、脆弱性が存在する状態\n\n■ 攻撃フロー\n【フェーズ1: 準備】\n【操作】: 攻撃者は、脆弱性が存在するIvanti EPMMを特定する\n【目的】: 脆弱性が存在するEPMMを特定し、攻撃対象とする\n【結果】: 攻撃対象のEPMMが特定される\n\n【フェーズ2: 実行】\n【操作】: 攻撃者は、特定したEPMMに対して、任意のコードを注入する\n【目的】: 任意のコードを実行し、システムへのアクセスを得る\n【結果】: 攻撃者は、EPMMに任意のコードを実行可能になる\n\n## IoC・痕跡情報\n- ハッシュ値: 記載なし\n- C2ドメイン・IP: 記載なし\n- 特徴的なパターン: 記載なし\n\n## MITRE ATT&CK マッピング\n- T1068: 権限昇格\n\n## 検知・防御策\n**防御策**\n・ Ivanti EPMMを最新バージョンにアップデートする\n・ 脆弱性が存在するEPMMをネットワークから隔離する\n・ アクセス制御リスト（ACL）を使用して、EPMMへのアクセスを制限する\n\n**検知策**\n①検知ポイント: EDRのプロセス生成ログ、Windowsイベントログ4688\n②Sigma/KQL:\n```\ntitle: Ivanti EPMM Code Injection\nquery: process.name = 'EPMM' and process.args = '/inject'\n```",
+    "url": "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog"
+  },
+  {
     "date": "2026-04-09",
     "category": "INITIAL",
     "title": "Microsoft Visual Studio Code mcp.jsonコマンドインジェクションによるリモートコード実行",
