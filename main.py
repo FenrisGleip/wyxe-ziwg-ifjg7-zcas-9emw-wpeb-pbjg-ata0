@@ -40,7 +40,7 @@ tavily_client = TavilyClient(api_key=TAVILY_KEY) if (_TAVILY_AVAILABLE and TAVIL
 GEMINI_KEY  = os.getenv("GEMINI_API_KEY")
 if _GEMINI_AVAILABLE and GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    gemini_model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+    gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 else:
     gemini_model = None
 
@@ -66,10 +66,10 @@ FALLBACK_MODEL = "llama-3.3-70b-versatile"  # llama-4-scout失敗時のフォー
 RSS_FEEDS = {
     "MALWARE": [
         "https://securelist.com/feed/",                               # Kaspersky Securelist (深い技術分析)
-        "https://unit42.paloaltonetworks.com/feed/",                  # Palo Alto Unit42 (APT/マルウェア)
+        "https://cybersecuritynews.com/feed/",                        # Cybersecurity News (速報・PoC情報)
         "https://blog.malwarebytes.com/feed/",                        # Malwarebytes Labs
         "https://isc.sans.edu/rssfeed_full.xml",                      # SANS ISC Diary
-        "https://www.welivesecurity.com/en/rss/feed/",                # ESET WeLiveSecurity
+        "https://www.helpnetsecurity.com/feed/",                      # Help Net Security (malware analysis)
     ],
     "INITIAL": [
         "https://securityaffairs.com/feed",                           # Security Affairs (PoC情報が早い)
@@ -79,11 +79,11 @@ RSS_FEEDS = {
         "https://seclists.org/rss/fulldisclosure.rss",                # Full Disclosure ML
     ],
     "POST_EXP": [
-        "https://www.cyderes.com/howler-cell/feed/",                  # Cyderes Howler Cell (BlueHammer等)
+        "https://www.cyderes.com/feed/",                             # Cyderes (broader feed)
         "https://research.checkpoint.com/feed/",                      # Check Point Research
         "https://www.elastic.co/security-labs/rss/feed.xml",         # Elastic Security Labs
         "https://www.redpacketsecurity.com/feed/",                    # RedPacket Security (技術分析)
-        "https://www.trustedsec.com/feed/",                           # TrustedSec
+        "https://bishopfox.com/blog/feed",                           # Bishop Fox (post-exp research)
     ],
     "AI_SEC": [
         "https://blog.trailofbits.com/feed/",                         # Trail of Bits
@@ -187,7 +187,7 @@ def build_screening_prompt(content: str, category: str) -> str:
 - ITW悪用確認
 
 SOURCE:
-{{content[:3000]}}"""
+{content[:3000]}"""
 
 def build_report_prompt(content: str, category: str) -> str:
     """Gemini用: CoT強化・詳細レポート生成"""
@@ -256,7 +256,7 @@ OUTPUT: ONLY valid JSON. No markdown fences. Use \n for newlines in report field
 {{"title":"30字以内日本語タイトル","summary_points":["要点1","要点2","要点3"],"poc_url":"GitHubURLか空文字","cvss_score":"数値か空文字","mitre_ids":["T1566.001"],"report":"## 概要\n..."}}
 
 SOURCE ARTICLE:
-{{content[:6000]}}"""
+{content[:6000]}"""
 
 def build_report_prompt_legacy(content: str, category: str) -> str:
     """Gemini未使用時のフォールバック（元のプロンプト）"""
@@ -462,25 +462,36 @@ def validate_result(res: dict) -> bool:
 # Gemini呼び出し（詳細レポート生成）
 # ─────────────────────────────────────────────
 def call_gemini(prompt: str) -> dict | None:
-    """Gemini 2.5 Flash でレポートを生成する"""
+    """Gemini 2.5 Flash でレポートを生成する（レート制限対応）"""
     if not gemini_model:
         return None
-    try:
-        response = gemini_model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.2,
-                max_output_tokens=4096,
+    for attempt in range(2):
+        try:
+            response = gemini_model.generate_content(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.2,
+                    max_output_tokens=4096,
+                )
             )
-        )
-        raw = response.text
-        result = extract_json(raw)
-        if result and validate_result(result):
-            return result
-        return None
-    except Exception as e:
-        print(f"    ✗ [Gemini] {e}")
-        return None
+            raw = response.text
+            result = extract_json(raw)
+            if result and validate_result(result):
+                return result
+            if result and result.get("skip"):
+                return None
+            print(f"    ✗ [Gemini] attempt {attempt+1} — 品質不足")
+            return None
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "quota" in err.lower() or "rate" in err.lower():
+                wait = 30 if attempt == 0 else 60
+                print(f"    ✗ [Gemini] レート制限 — {wait}秒待機...")
+                time.sleep(wait)
+            else:
+                print(f"    ✗ [Gemini] {e}")
+                return None
+    return None
 
 # ─────────────────────────────────────────────
 # LLM呼び出し（モデルフォールバック付きリトライ）
@@ -711,6 +722,9 @@ def fetch_and_analyze(existing_urls: set[str]) -> list[dict]:
     print("  RED-INTEL AGENT v3.2 — RSS情報収集開始")
     print("=" * 50)
     print(f"  既存DB URL数: {len(existing_urls)} 件（スキップ対象）")
+
+    global _tpd_hit_models
+    _tpd_hit_models = set()  # 毎実行でリセット
 
     new_articles: list[dict] = []
     seen_urls         = set(existing_urls)
