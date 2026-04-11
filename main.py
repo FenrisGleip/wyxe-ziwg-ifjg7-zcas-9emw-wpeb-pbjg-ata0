@@ -502,7 +502,7 @@ def _extract_json(raw: str) -> dict | None:
     return None
 
 
-def call_cerebras(prompt: str, model: str = "llama3.3-70b",
+def call_cerebras(prompt: str, model: str = "qwen-3-235b-a22b-instruct-2507",
                   max_tokens: int = 8000) -> dict | None:
     if not cerebras_client: return None
     try:
@@ -519,24 +519,56 @@ def call_cerebras(prompt: str, model: str = "llama3.3-70b",
         return None
 
 
-def call_openrouter(prompt: str, model: str = "deepseek/deepseek-chat-v3-0324:free",
+OR_MODELS = {
+    "general":   [
+        "nvidia/nemotron-3-super:free",
+        "openai/gpt-oss-120b:free",
+        "arcee-ai/trinity-large-preview:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+    ],
+    "code":      [
+        "qwen/qwen3-coder-480b-a35b:free",
+        "openai/gpt-oss-120b:free",
+        "z-ai/glm-4.5-air:free",
+        "nvidia/nemotron-3-super:free",
+    ],
+    "reasoning": [
+        "nvidia/nemotron-3-super:free",
+        "arcee-ai/trinity-large-preview:free",
+        "minimax/minimax-m2.5:free",
+    ],
+}
+
+def call_openrouter(prompt: str, role: str = "general",
                     max_tokens: int = 8000) -> dict | None:
-    if not openrouter_client: return None
-    try:
-        resp = openrouter_client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.25,
-            max_tokens=max_tokens,
-            extra_headers={
-                "HTTP-Referer": "https://github.com/cipher-intel",
-                "X-Title": "CIPHER Intel",
-            },
-        )
-        return _extract_json(resp.choices[0].message.content)
-    except Exception as e:
-        print(f"    ✗ [OR/{model.split('/')[-1][:20]}] {str(e)[:140]}")
+    if not openrouter_client:
         return None
+    models = OR_MODELS.get(role, OR_MODELS["general"])
+    for m in models:
+        try:
+            resp = openrouter_client.chat.completions.create(
+                model=m,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.25,
+                max_tokens=max_tokens,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/cipher-intel",
+                    "X-Title": "CIPHER Intel",
+                },
+            )
+            result = _extract_json(resp.choices[0].message.content)
+            if result:
+                print(f"    ✓ [OR/{m.split('/')[-1][:25]}] OK")
+                return result
+            print(f"    ✗ [OR/{m.split('/')[-1][:25]}] empty/invalid")
+        except Exception as e:
+            err = str(e)[:120]
+            print(f"    ✗ [OR/{m.split('/')[-1][:25]}] {err}")
+            if "429" in err or "rate" in err.lower():
+                time.sleep(2)
+            elif "404" in err or "not found" in err.lower():
+                continue
+    return None
 
 
 _GROQ_TPD_DEAD: set = set()
@@ -595,7 +627,7 @@ def call_gemini(prompt: str) -> dict | None:
         err = str(e)
         if "429" in err or "quota" in err.lower():
             print(f"    ✗ [Gemini] rate limit — waiting 40s")
-            time.sleep(15)
+            time.sleep(7)
             try:
                 resp = gemini_model.generate_content(
                     prompt,
@@ -609,15 +641,14 @@ def call_gemini(prompt: str) -> dict | None:
         return None
 
 
-def call_llm_chain(prompt: str, prefer: list[str] = None) -> dict | None:
-    """Try generators in order until one succeeds.
-    prefer = ordered list of: 'cerebras', 'openrouter', 'groq', 'gemini'"""
+def call_llm_chain(prompt: str, prefer: list[str] = None,
+                   role: str = "general") -> dict | None:
     order = prefer or ["cerebras", "openrouter", "groq", "gemini"]
     for name in order:
         if name == "cerebras":
             r = call_cerebras(prompt)
         elif name == "openrouter":
-            r = call_openrouter(prompt)
+            r = call_openrouter(prompt, role=role)
         elif name == "groq":
             r = call_groq(prompt)
         elif name == "gemini":
@@ -628,21 +659,6 @@ def call_llm_chain(prompt: str, prefer: list[str] = None) -> dict | None:
             print(f"    ✓ [{name}] OK")
             return r
     return None
-# ============================================================================
-# main.py  —  Part 2 of 3
-# ============================================================================
-# Append directly after Part 1.
-#
-# Contents:
-#   - RSS / article body / Tavily fetchers
-#   - Data enrichment: NVD, CISA KEV, MITRE ATT&CK, GitHub code search,
-#                      VirusTotal, AlienVault OTX
-#   - Self-RAG (30-day window keyword match against existing DB)
-#   - Knowledge Graph update (APT/Malware/CVE/Tool/Technique/Industry/Country)
-#   - Atomic Red Team yaml writer
-#   - multi_agent_pipeline()  — orchestration of all 7 agents with critic loop
-#   - process_article()       — single-article end-to-end handler
-# ============================================================================
 
 
 # ─── RSS / HTML body fetch (improved from v4.1) ─────────────────────────────
@@ -1148,10 +1164,10 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
     triage["category"] = category
 
     # ─── Agent 1: Analyst (Cerebras primary) ────────────────────────────
-    print(f"    [Analyst] generating mechanism...")
     analyst_out = call_llm_chain(
         prompt_analyst(content, triage, research_context, related_articles),
         prefer=["cerebras", "openrouter", "groq"],
+        role="reasoning",
     )
     if not analyst_out or not analyst_out.get("mechanism_md"):
         print(f"    ✗ Analyst failed")
@@ -1161,9 +1177,10 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
 
     # ─── Agent 2: Exploit writer (DeepSeek via OpenRouter primary) ──────
     print(f"    [Exploit] generating reproduction + lab + atomic...")
-    exploit_out = call_llm_chain(
-        prompt_exploit(content, triage, mechanism_md, research_context),
-        prefer=["openrouter", "cerebras", "groq"],
+    editor_out = call_llm_chain(
+        prompt_editor(...),
+        prefer=["cerebras", "openrouter", "groq"],
+        role="reasoning",
     )
     if not exploit_out:
         print(f"    ✗ Exploit failed")
@@ -1176,7 +1193,8 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
     print(f"    [Detection] generating SIEM queries...")
     detection_out = call_llm_chain(
         prompt_detection(mechanism_md, reproduction_md, extra_iocs),
-        prefer=["cerebras", "groq", "openrouter"],
+        prefer=["cerebras", "openrouter", "groq"],
+        role="code",
     )
     if not detection_out:
         print(f"    ✗ Detection failed — using minimal stub")
@@ -1205,10 +1223,11 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
     critic_scores = []
     for loop in range(MAX_CRITIC_LOOPS + 1):
         print(f"    [Critic] reviewing (loop {loop+1})...")
-        critic_out = call_llm_chain(
-            prompt_critic(final_report, triage),
-            prefer=["gemini", "cerebras", "groq"],
-        )
+    critic_out = call_llm_chain(
+        prompt_critic(final_report, triage),
+        prefer=["gemini", "openrouter", "cerebras"],
+        role="reasoning",
+    )
         if not critic_out:
             print(f"    ⚠ Critic unavailable — accepting as-is")
             break
