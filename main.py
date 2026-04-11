@@ -502,7 +502,7 @@ def _extract_json(raw: str) -> dict | None:
     return None
 
 
-def call_cerebras(prompt: str, model: str = "llama-3.3-70b",
+def call_cerebras(prompt: str, model: str = "llama3.3-70b",
                   max_tokens: int = 8000) -> dict | None:
     if not cerebras_client: return None
     try:
@@ -519,7 +519,7 @@ def call_cerebras(prompt: str, model: str = "llama-3.3-70b",
         return None
 
 
-def call_openrouter(prompt: str, model: str = "deepseek/deepseek-chat-v3.1:free",
+def call_openrouter(prompt: str, model: str = "deepseek/deepseek-chat-v3-0324:free",
                     max_tokens: int = 8000) -> dict | None:
     if not openrouter_client: return None
     try:
