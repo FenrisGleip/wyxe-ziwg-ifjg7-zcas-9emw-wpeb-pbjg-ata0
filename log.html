@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIPHER // Run Log</title>
+<style>
+:root{--bg:#0f1419;--surf:#1a1f29;--surf2:#232834;--bdr:#2a3140;--text:#c8d1dc;--muted:#7a8699;--hi:#fff;--acc:#4fc3f7;--good:#66bb6a;--err:#ef5350;--mono:ui-monospace,monospace;--sans:-apple-system,'Noto Sans JP',sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);padding:30px 20px 60px}
+.wrap{max-width:780px;margin:0 auto}
+.back{display:inline-block;font-family:var(--mono);font-size:.75rem;color:var(--muted);border:1px solid var(--bdr);padding:6px 12px;border-radius:6px;text-decoration:none;margin-bottom:20px}
+.back:hover{color:var(--acc);border-color:var(--acc)}
+h1{font-size:1.6rem;font-weight:700;color:var(--hi)}
+h1 span{color:var(--acc)}
+.sub{font-family:var(--mono);font-size:.72rem;color:var(--muted);margin:4px 0 24px}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:30px}
+@media(max-width:600px){.grid{grid-template-columns:1fr 1fr}}
+.stat{background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:16px;text-align:center}
+.stat b{display:block;font-size:1.4rem;color:var(--hi)}
+.stat .lbl{font-family:var(--mono);font-size:.62rem;color:var(--muted);margin-top:4px}
+.stat.warn b{color:var(--err)}
+.stat.good b{color:var(--good)}
+.row{background:var(--surf);border:1px solid var(--bdr);border-radius:6px;padding:12px 16px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.row.today{border-left:3px solid var(--acc)}
+.dt{font-family:var(--mono);font-size:.82rem;color:var(--hi);flex:1}
+.badge{font-family:var(--mono);font-size:.68rem;padding:2px 8px;border-radius:3px;font-weight:700}
+.badge.new{background:rgba(79,195,247,.15);color:var(--acc)}
+.badge.zero{color:var(--muted);background:var(--surf2)}
+.badge.res{background:rgba(186,104,200,.15);color:#ba68c8}
+.badge.score{background:rgba(102,187,106,.15);color:var(--good)}
+</style></head><body>
+<div class="wrap">
+<a href="index.html" class="back">← CIPHER</a>
+<h1><span>◆</span> Run Log</h1>
+<div class="sub">// マルチエージェント実行履歴</div>
+<div class="grid" id="summary"></div>
+<div id="rows"></div>
+</div>
+<script src="log.js"></script>
+<script>
+const log=(window.__RUN_LOG__||[]).slice().reverse();
+const today=new Date().toISOString().slice(0,10);
+const totalRuns=log.length;
+const totalNew=log.reduce((s,r)=>s+(r.new_articles||0),0);
+const totalRes=log.reduce((s,r)=>s+(r.researched_count||0),0);
+const totalPass=log.reduce((s,r)=>s+(r.critic_passed||0),0);
+const avgScore=(()=>{const ss=log.map(r=>r.avg_critic_score||0).filter(x=>x>0);return ss.length?(ss.reduce((a,b)=>a+b,0)/ss.length).toFixed(1):'—'})();
+document.getElementById('summary').innerHTML=`
+<div class="stat"><b>${totalRuns}</b><div class="lbl">RUNS</div></div>
+<div class="stat"><b>${totalNew}</b><div class="lbl">ARTICLES</div></div>
+<div class="stat"><b>${totalRes}</b><div class="lbl">RESEARCHED</div></div>
+<div class="stat good"><b>${totalPass}</b><div class="lbl">CRITIC PASS</div></div>
+<div class="stat"><b>${avgScore}</b><div class="lbl">AVG SCORE</div></div>`;
+const rows=document.getElementById('rows');
+if(!log.length){rows.innerHTML='<div style="text-align:center;padding:60px;color:var(--muted);font-family:var(--mono)">// no runs</div>'}
+else{
+rows.innerHTML=log.map(r=>{
+  const td=r.datetime_jst?.startsWith(today);
+  const nb=r.new_articles>0?`<span class="badge new">+${r.new_articles}</span>`:`<span class="badge zero">±0</span>`;
+  const rb=r.researched_count>0?`<span class="badge res">🔍${r.researched_count}</span>`:'';
+  const sb=r.avg_critic_score>0?`<span class="badge score">★${r.avg_critic_score}</span>`:'';
+  return `<div class="row ${td?'today':''}">
+    <div class="dt">${r.datetime_jst}</div>
+    ${nb}${rb}${sb}
+    <span style="font-family:var(--mono);font-size:.68rem;color:var(--muted)">total: ${r.total_articles||'—'}</span>
+  </div>`;
+}).join('');
+}
+</script></body></html>

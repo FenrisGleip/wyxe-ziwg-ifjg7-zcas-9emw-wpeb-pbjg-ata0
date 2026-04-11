@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIPHER v5 // Red Team Intel</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+<style>
+:root{
+  --bg:#0f1419;--surf:#1a1f29;--surf2:#232834;--bdr:#2a3140;
+  --text:#c8d1dc;--muted:#7a8699;--hi:#fff;
+  --acc:#4fc3f7;--acc2:#ffb74d;--good:#66bb6a;--bad:#ef5350;
+  --MAL:#ef5350;--INIT:#ffb74d;--POST:#ba68c8;--AI:#4fc3f7;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans JP',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+.hdr{position:sticky;top:0;z-index:50;background:rgba(15,20,25,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--bdr);padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.hdr-title{font-size:1.15rem;font-weight:700;color:var(--hi)}
+.hdr-title span{color:var(--acc)}
+.hdr-sub{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.hdr-stats{margin-left:auto;display:flex;gap:14px;font-family:var(--mono);font-size:.75rem;color:var(--muted)}
+.hdr-stats b{color:var(--hi)}
+.hdr-log{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:1px solid var(--bdr);padding:5px 10px;border-radius:4px}
+.hdr-log:hover{color:var(--acc);border-color:var(--acc);text-decoration:none}
+.kg-panel{max-width:900px;margin:14px auto 0;padding:14px 20px;background:var(--surf);border:1px solid var(--bdr);border-radius:8px;display:none}
+.kg-panel.open{display:block}
+.kg-toggle{max-width:900px;margin:14px auto 0;padding:0 20px;font-family:var(--mono);font-size:.7rem;color:var(--muted);cursor:pointer}
+.kg-toggle:hover{color:var(--acc)}
+.kg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.kg-sec{background:var(--surf2);border:1px solid var(--bdr);border-radius:6px;padding:10px 12px}
+.kg-sec h4{font-family:var(--mono);font-size:.65rem;color:var(--acc);letter-spacing:.08em;margin-bottom:6px}
+.kg-item{font-family:var(--mono);font-size:.72rem;color:var(--text);padding:2px 0;display:flex;justify-content:space-between}
+.kg-item b{color:var(--acc2)}
+.ctrl{max-width:900px;margin:18px auto 8px;padding:0 20px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+#search{flex:1;min-width:200px;padding:10px 14px;background:var(--surf);border:1px solid var(--bdr);color:var(--hi);border-radius:6px;font-size:.9rem;outline:none}
+#search:focus{border-color:var(--acc)}
+#search::placeholder{color:var(--muted)}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.fbtn{padding:6px 12px;background:var(--surf);border:1px solid var(--bdr);color:var(--muted);border-radius:20px;cursor:pointer;font-family:var(--mono);font-size:.72rem;font-weight:600}
+.fbtn:hover{color:var(--text);border-color:var(--muted)}
+.fbtn.on{background:var(--acc);color:#000;border-color:var(--acc)}
+.feed{max-width:900px;margin:0 auto;padding:0 20px 60px}
+.day{font-family:var(--mono);font-size:.72rem;color:var(--muted);letter-spacing:.1em;margin:24px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
+.day.today{color:var(--acc)}
+.card{background:var(--surf);border:1px solid var(--bdr);border-radius:8px;padding:18px 20px;margin-bottom:12px;cursor:pointer}
+.card:hover{border-color:var(--muted)}
+.card-top{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.tag{font-family:var(--mono);font-size:.65rem;font-weight:700;padding:3px 9px;border-radius:3px;letter-spacing:.04em}
+.tag.MALWARE{background:rgba(239,83,80,.15);color:var(--MAL)}
+.tag.INITIAL{background:rgba(255,183,77,.15);color:var(--INIT)}
+.tag.POST_EXP{background:rgba(186,104,200,.15);color:var(--POST)}
+.tag.AI_SEC{background:rgba(79,195,247,.15);color:var(--AI)}
+.meta{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.score{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:3px;margin-left:auto;background:var(--surf2);color:var(--muted)}
+.score.s-good{background:rgba(102,187,106,.15);color:var(--good)}
+.score.s-mid{background:rgba(255,183,77,.15);color:var(--INIT)}
+.score.s-bad{background:rgba(239,83,80,.15);color:var(--bad)}
+.cvss{font-family:var(--mono);font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:3px}
+.cvss.crit{background:rgba(239,83,80,.15);color:var(--MAL)}
+.cvss.high{background:rgba(255,183,77,.15);color:var(--INIT)}
+.cvss.med{background:rgba(255,213,79,.15);color:#ffd54f}
+.cvss.low{background:rgba(79,195,247,.15);color:var(--AI)}
+.researched,.revised{font-family:var(--mono);font-size:.62rem;font-weight:700;padding:2px 8px;border-radius:3px}
+.researched{background:rgba(186,104,200,.15);color:var(--POST)}
+.revised{background:rgba(255,183,77,.15);color:var(--INIT)}
+.title{font-size:1.12rem;font-weight:700;color:var(--hi);line-height:1.45;margin-bottom:8px}
+.sum{list-style:none;padding:0;margin:0}
+.sum li{padding:3px 0 3px 16px;position:relative;font-size:.88rem;line-height:1.65}
+.sum li::before{content:'•';position:absolute;left:4px;color:var(--acc)}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:12px}
+.chip{font-family:var(--mono);font-size:.65rem;padding:2px 8px;border-radius:3px;background:var(--surf2);color:var(--muted);border:1px solid var(--bdr)}
+.chip.cve{color:var(--INIT);border-color:rgba(255,183,77,.3)}
+.chip.mitre{color:var(--POST);border-color:rgba(186,104,200,.3)}
+.chip.apt{color:var(--bad);border-color:rgba(239,83,80,.3);font-weight:700}
+.chip.mal{color:var(--MAL);border-color:rgba(239,83,80,.25)}
+.chip.poc{color:var(--AI);border-color:rgba(79,195,247,.3);font-weight:700}
+.chip.atomic{color:var(--good);border-color:rgba(102,187,106,.3);font-weight:700}
+.src{display:block;margin-top:10px;padding-top:10px;border-top:1px solid var(--bdr);font-family:var(--mono);font-size:.68rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty{text-align:center;padding:80px 20px;color:var(--muted);font-family:var(--mono)}
+#det{position:fixed;inset:0;background:var(--bg);z-index:100;display:none;flex-direction:column}
+#det.open{display:flex}
+.det-hdr{position:sticky;top:0;background:rgba(15,20,25,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--bdr);padding:12px 20px;display:flex;align-items:center;gap:12px}
+.back{background:var(--surf);border:1px solid var(--bdr);color:var(--text);padding:7px 16px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:.75rem;font-weight:600}
+.back:hover{border-color:var(--acc);color:var(--acc)}
+.det-src{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.det-body{flex:1;overflow-y:auto;padding:30px 20px 60px}
+.det-in{max-width:780px;margin:0 auto}
+.det-title{font-size:1.7rem;font-weight:700;color:var(--hi);line-height:1.3;margin-bottom:14px}
+.det-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--bdr)}
+.poc-btn{background:var(--AI);color:#000;padding:8px 16px;border-radius:6px;font-family:var(--mono);font-weight:700;font-size:.78rem}
+.atomic-list{background:var(--surf);border:1px solid var(--good);border-radius:6px;padding:12px 16px;margin:16px 0;font-size:.85rem}
+.atomic-list h4{color:var(--good);font-family:var(--mono);font-size:.78rem;margin-bottom:6px}
+.atomic-list a{display:block;margin:3px 0;font-family:var(--mono);font-size:.78rem}
+.critic-bar{background:var(--surf);border:1px solid var(--bdr);border-radius:6px;padding:10px 14px;margin:14px 0;font-family:var(--mono);font-size:.7rem;display:flex;gap:14px;flex-wrap:wrap}
+.critic-bar b{color:var(--hi)}
+.md h1{display:none}
+.md h2{font-size:1.15rem;font-weight:700;color:var(--hi);margin:32px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
+.md h3{font-size:.98rem;font-weight:700;color:var(--acc2);margin:20px 0 8px}
+.md h4{font-size:.92rem;font-weight:700;color:var(--acc);margin:16px 0 6px}
+.md p{margin:10px 0}
+.md ul,.md ol{padding-left:24px;margin:10px 0}
+.md li{margin:5px 0}
+.md strong{color:var(--hi);font-weight:700}
+.md code{font-family:var(--mono);font-size:.85em;background:var(--surf2);color:var(--acc2);padding:2px 6px;border-radius:3px}
+.md pre{background:#0a0d12;border:1px solid var(--bdr);border-left:3px solid var(--acc);border-radius:6px;padding:14px 16px;overflow-x:auto;margin:14px 0;position:relative}
+.md pre code{background:none;color:#e0e6ed;padding:0;font-size:.82rem;line-height:1.7}
+.md blockquote{border-left:3px solid var(--bdr);padding:4px 14px;color:var(--muted);margin:12px 0;background:var(--surf)}
+.md table{border-collapse:collapse;margin:14px 0;font-size:.85rem;width:100%}
+.md th,.md td{padding:8px 12px;border:1px solid var(--bdr);text-align:left}
+.md th{background:var(--surf2);color:var(--hi)}
+.copy{position:absolute;top:8px;right:8px;background:var(--surf);border:1px solid var(--bdr);color:var(--muted);font-family:var(--mono);font-size:.65rem;padding:3px 9px;border-radius:4px;cursor:pointer}
+.copy:hover{color:var(--acc);border-color:var(--acc)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:4px}
+@media(max-width:600px){
+  .hdr{padding:12px 14px}
+  .hdr-stats{font-size:.7rem;gap:10px;width:100%;order:3}
+  .ctrl{padding:0 14px}
+  .feed{padding:0 14px 60px}
+  .card{padding:15px 16px}
+  .title{font-size:1.02rem}
+  .det-body{padding:24px 16px 50px}
+  .det-title{font-size:1.35rem}
+}
+</style>
+</head>
+<body>
+
+<header class="hdr">
+  <div>
+    <div class="hdr-title"><span>◆</span> CIPHER v5</div>
+    <div class="hdr-sub">// Multi-Agent Red Team Intel</div>
+  </div>
+  <div class="hdr-stats">
+    <span><b id="stat-total">0</b> total</span>
+    <span><b id="stat-today">0</b> today</span>
+    <span><b id="stat-research">0</b> 🔍</span>
+    <span><b id="stat-score">—</b> avg</span>
+  </div>
+  <a href="log.html" class="hdr-log">📋 実行ログ</a>
+</header>
+
+<div class="kg-toggle" onclick="document.getElementById('kg-panel').classList.toggle('open')">▶ Knowledge Graph (click to expand)</div>
+<div class="kg-panel" id="kg-panel"><div class="kg-grid" id="kg-grid"></div></div>
+
+<div class="ctrl">
+  <input type="text" id="search" placeholder="🔍 タイトル・本文・CVE・APT・国・業界で検索..." autocomplete="off">
+  <div class="filters">
+    <button class="fbtn on" data-cat="ALL">ALL</button>
+    <button class="fbtn" data-cat="MALWARE">MAL</button>
+    <button class="fbtn" data-cat="INITIAL">INIT</button>
+    <button class="fbtn" data-cat="POST_EXP">POST</button>
+    <button class="fbtn" data-cat="AI_SEC">AI</button>
+    <button class="fbtn" data-cat="RESEARCHED">🔍</button>
+    <button class="fbtn" data-cat="HIGH_SCORE">★7+</button>
+  </div>
+</div>
+
+<main class="feed" id="feed"></main>
+
+<div id="det">
+  <div class="det-hdr">
+    <button class="back" onclick="closeDet()">← 戻る</button>
+    <a id="det-src-link" class="det-src" href="#" target="_blank">元記事 ↗</a>
+  </div>
+  <div class="det-body"><div class="det-in" id="det-body"></div></div>
+</div>
+
+<script src="kg.js"></script>
+<script src="articles.js"></script>
+<script>
+const db = (window.__ARTICLES__ || []).slice();
+const kg = window.__KG__ || {};
+const today = new Date().toISOString().slice(0,10);
+let activeCat = 'ALL';
+
+function esc(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function cvssCls(s){const n=parseFloat(s);if(isNaN(n))return'';if(n>=9)return'crit';if(n>=7)return'high';if(n>=4)return'med';return'low'}
+function pocOk(u){return u && u.startsWith('http')}
+function bestScore(a){
+  const cs=a.critic_scores||[];
+  if(!cs.length)return null;
+  return Math.max(...cs.map(c=>c.overall||0));
+}
+function scoreCls(s){if(s==null)return'';if(s>=7)return's-good';if(s>=5)return's-mid';return's-bad'}
+
+// Stats
+document.getElementById('stat-total').textContent=db.length;
+document.getElementById('stat-today').textContent=db.filter(a=>a.date===today).length;
+document.getElementById('stat-research').textContent=db.filter(a=>a.researched).length;
+const scored=db.map(bestScore).filter(x=>x!=null);
+document.getElementById('stat-score').textContent=scored.length?(scored.reduce((a,b)=>a+b,0)/scored.length).toFixed(1):'—';
+
+// KG panel
+const kgSections=[
+  {key:'threat_actors',label:'APT / Actor'},
+  {key:'malware_families',label:'Malware'},
+  {key:'cves',label:'CVE'},
+  {key:'techniques',label:'ATT&CK'},
+  {key:'industries',label:'Industries'},
+  {key:'countries',label:'Countries'},
+];
+const kgGrid=document.getElementById('kg-grid');
+kgSections.forEach(s=>{
+  const items=(kg[s.key]||[]).slice(0,8);
+  if(!items.length)return;
+  const div=document.createElement('div');
+  div.className='kg-sec';
+  div.innerHTML='<h4>'+s.label+'</h4>'+items.map(i=>
+    '<div class="kg-item"><span>'+esc(i.name)+'</span><b>'+i.count+'</b></div>').join('');
+  kgGrid.appendChild(div);
+});
+
+// Filters
+document.querySelectorAll('.fbtn').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');activeCat=b.dataset.cat;render();
+  };
+});
+document.getElementById('search').oninput=render;
+
+function render(){
+  const q=document.getElementById('search').value.toLowerCase();
+  const feed=document.getElementById('feed');
+  feed.innerHTML='';
+  const filtered=db.filter(a=>{
+    if(activeCat==='RESEARCHED')return a.researched;
+    if(activeCat==='HIGH_SCORE'){const s=bestScore(a);return s!=null&&s>=7}
+    if(activeCat!=='ALL'&&a.category!==activeCat)return false;
+    if(q){
+      const hay=(a.title+' '+(a.summary_points||[]).join(' ')+' '+a.content+' '+
+        (a.cve_ids||[]).join(' ')+' '+(a.threat_actor||'')+' '+(a.malware_family||'')+' '+
+        (a.industries||[]).join(' ')+' '+(a.countries||[]).join(' ')).toLowerCase();
+      if(!hay.includes(q))return false;
+    }
+    return true;
+  });
+  if(!filtered.length){feed.innerHTML='<div class="empty">// 該当なし</div>';return}
+  const groups={};
+  filtered.forEach(a=>{(groups[a.date]=groups[a.date]||[]).push(a)});
+  const frag=document.createDocumentFragment();
+  Object.keys(groups).sort().reverse().forEach(date=>{
+    const d=document.createElement('div');
+    d.className='day'+(date===today?' today':'');
+    d.textContent=date===today?date+'  ● TODAY':date;
+    frag.appendChild(d);
+    groups[date].forEach(a=>{
+      const card=document.createElement('div');
+      card.className='card';
+      const pts=(a.summary_points||[]).slice(0,3);
+      const sumHtml=pts.length?'<ul class="sum">'+pts.map(p=>'<li>'+esc(p)+'</li>').join('')+'</ul>':'';
+      const cvssH=a.cvss_score?'<span class="cvss '+cvssCls(a.cvss_score)+'">CVSS '+esc(a.cvss_score)+'</span>':'';
+      const resH=a.researched?'<span class="researched">🔍</span>':'';
+      const revH=(a.critic_scores||[]).length>1?'<span class="revised">↻ revised</span>':'';
+      const bs=bestScore(a);
+      const scH=bs!=null?'<span class="score '+scoreCls(bs)+'">★'+bs+'/10</span>':'';
+      const aptH=a.threat_actor?'<span class="chip apt">'+esc(a.threat_actor)+'</span>':'';
+      const malH=a.malware_family?'<span class="chip mal">'+esc(a.malware_family)+'</span>':'';
+      const cveH=(a.cve_ids||[]).slice(0,3).map(c=>'<span class="chip cve">'+esc(c)+'</span>').join('');
+      const mitH=(a.mitre_ids||[]).slice(0,4).map(m=>'<span class="chip mitre">'+esc(m)+'</span>').join('');
+      const pocH=pocOk(a.poc_url)?'<span class="chip poc">⚡ PoC</span>':'';
+      const atH=(a.atomic_files||[]).length?'<span class="chip atomic">🧪 '+a.atomic_files.length+' atomic</span>':'';
+      let host=a.url;try{host=new URL(a.url).hostname.replace(/^www\./,'')}catch(e){}
+      card.innerHTML=`
+        <div class="card-top">
+          <span class="tag ${a.category}">${a.category}</span>
+          <span class="meta">${a.date}</span>
+          ${resH}${revH}${cvssH}${scH}
+        </div>
+        <div class="title">${esc(a.title)}</div>
+        ${sumHtml}
+        <div class="chips">${aptH}${malH}${cveH}${mitH}${pocH}${atH}</div>
+        <a class="src" href="${esc(a.url)}" target="_blank" onclick="event.stopPropagation()">📎 ${esc(host)}</a>
+      `;
+      card.onclick=()=>openDet(a);
+      frag.appendChild(card);
+    });
+  });
+  feed.appendChild(frag);
+}
+
+function openDet(a){
+  const body=document.getElementById('det-body');
+  let meta='<span class="tag '+a.category+'">'+a.category+'</span>';
+  meta+='<span class="meta">'+a.date+'</span>';
+  if(a.cvss_score)meta+='<span class="cvss '+cvssCls(a.cvss_score)+'">CVSS '+esc(a.cvss_score)+'</span>';
+  const bs=bestScore(a);
+  if(bs!=null)meta+='<span class="score '+scoreCls(bs)+'">★'+bs+'/10</span>';
+  if(a.researched)meta+='<span class="researched">🔍 補完済</span>';
+  if(a.threat_actor)meta+='<span class="chip apt">'+esc(a.threat_actor)+'</span>';
+  if(a.malware_family)meta+='<span class="chip mal">'+esc(a.malware_family)+'</span>';
+  (a.cve_ids||[]).forEach(c=>meta+='<span class="chip cve">'+esc(c)+'</span>');
+  (a.mitre_ids||[]).forEach(m=>meta+='<span class="chip mitre">'+esc(m)+'</span>');
+  if(pocOk(a.poc_url))meta+='<a href="'+esc(a.poc_url)+'" target="_blank" class="poc-btn">⚡ PoC</a>';
+
+  // Critic bar
+  let criticBar='';
+  const cs=(a.critic_scores||[]);
+  if(cs.length){
+    const best=cs.reduce((x,y)=>(y.overall||0)>(x.overall||0)?y:x);
+    criticBar='<div class="critic-bar">'+
+      '<span>📊 Critic Review</span>'+
+      '<span>Overall: <b>'+best.overall+'/10</b></span>'+
+      '<span>Specificity: <b>'+best.specificity+'</b></span>'+
+      '<span>Reproducibility: <b>'+best.reproducibility+'</b></span>'+
+      '<span>Accuracy: <b>'+best.accuracy+'</b></span>'+
+      '<span>Detection: <b>'+best.detection_quality+'</b></span>'+
+      '<span>Completeness: <b>'+best.completeness+'</b></span>'+
+      (cs.length>1?'<span>↻ '+(cs.length-1)+' revision(s)</span>':'')+
+      '</div>';
+  }
+
+  // Atomic list
+  let atomicList='';
+  if((a.atomic_files||[]).length){
+    atomicList='<div class="atomic-list"><h4>🧪 Atomic Red Team Tests</h4>'+
+      a.atomic_files.map(f=>'<a href="'+esc(f)+'" target="_blank">▸ '+esc(f)+'</a>').join('')+
+      '</div>';
+  }
+
+  const rendered=DOMPurify.sanitize(marked.parse(a.content||''));
+  body.innerHTML=`
+    <div class="det-title">${esc(a.title)}</div>
+    <div class="det-meta">${meta}</div>
+    ${criticBar}
+    ${atomicList}
+    <div class="md">${rendered}</div>
+    <div style="margin-top:36px;padding-top:18px;border-top:1px solid var(--bdr)">
+      <div style="font-family:var(--mono);font-size:.7rem;color:var(--muted);margin-bottom:6px">// SOURCE</div>
+      <a href="${esc(a.url)}" target="_blank" style="font-family:var(--mono);font-size:.8rem;word-break:break-all">${esc(a.url)}</a>
+    </div>
+  `;
+  body.querySelectorAll('pre').forEach(pre=>{
+    const btn=document.createElement('button');btn.className='copy';btn.textContent='COPY';
+    btn.onclick=e=>{e.stopPropagation();
+      const txt=pre.querySelector('code')?.textContent||pre.textContent;
+      navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓';setTimeout(()=>btn.textContent='COPY',1500)});
+    };
+    pre.appendChild(btn);
+  });
+  document.getElementById('det-src-link').href=a.url;
+  document.getElementById('det').classList.add('open');
+  history.pushState({view:'detail'},'');
+}
+function closeDet(){document.getElementById('det').classList.remove('open')}
+window.onpopstate=()=>closeDet();
+render();
+</script>
+</body>
+</html>

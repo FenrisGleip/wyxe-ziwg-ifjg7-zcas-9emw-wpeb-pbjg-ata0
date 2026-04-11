@@ -1,0 +1,13 @@
+{
+  "entities": {
+    "threat_actors": {},
+    "malware_families": {},
+    "cves": {},
+    "tools": {},
+    "techniques": {},
+    "industries": {},
+    "countries": {}
+  },
+  "relationships": [],
+  "updated": "2026-04-11 16:43"
+}
