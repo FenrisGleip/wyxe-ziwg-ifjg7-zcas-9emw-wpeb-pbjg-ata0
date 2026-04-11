@@ -1175,17 +1175,20 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
     mechanism_md = analyst_out["mechanism_md"]
     extra_iocs = analyst_out.get("key_iocs_extracted", [])
 
-    # ─── Agent 2: Exploit writer (DeepSeek via OpenRouter primary) ──────
+    # ─── Agent 2: Exploit writer (OpenRouter code-specialist primary) ───
     print(f"    [Exploit] generating reproduction + lab + atomic...")
-    editor_out = call_llm_chain(
-        prompt_editor(triage, mechanism_md, reproduction_md, lab_setup_md,
-                      detection_md, ioc_md, research_context),
-        prefer=["cerebras", "openrouter", "groq"],
-        role="reasoning",
+    exploit_out = call_llm_chain(
+        prompt_exploit(content, triage, mechanism_md, research_context),
+        prefer=["openrouter", "cerebras", "groq"],
+        role="code",
     )
     if not exploit_out:
-        print(f"    ✗ Exploit failed")
-        return None
+        print(f"    ✗ Exploit failed — using minimal stub")
+        exploit_out = {
+            "reproduction_md": "## 攻撃再現ガイド\n(生成失敗)",
+            "lab_setup_md":    "## 🧪 ラボ再現環境\n(生成失敗)",
+            "atomic_tests":    [],
+        }
     reproduction_md = exploit_out.get("reproduction_md", "")
     lab_setup_md    = exploit_out.get("lab_setup_md", "")
     atomic_tests    = exploit_out.get("atomic_tests", [])
