@@ -128,5 +128,49 @@
         "feed_errors": []
       }
     }
+  },
+  {
+    "datetime_jst": "2026-04-12 04:27",
+    "new_articles": 11,
+    "total_articles": 26,
+    "researched_count": 7,
+    "critic_passed": 3,
+    "critic_revised": 9,
+    "avg_critic_score": 6.1,
+    "tpd_exhausted": false,
+    "categories": {
+      "MALWARE": {
+        "adopted": 4,
+        "skipped": 22,
+        "researched": 3,
+        "tpd_hit": false,
+        "feed_errors": []
+      },
+      "INITIAL": {
+        "adopted": 5,
+        "skipped": 17,
+        "researched": 4,
+        "tpd_hit": false,
+        "feed_errors": [
+          "seclists.org"
+        ]
+      },
+      "POST_EXP": {
+        "adopted": 0,
+        "skipped": 8,
+        "researched": 0,
+        "tpd_hit": false,
+        "feed_errors": [
+          "specterops.io"
+        ]
+      },
+      "AI_SEC": {
+        "adopted": 2,
+        "skipped": 9,
+        "researched": 0,
+        "tpd_hit": false,
+        "feed_errors": []
+      }
+    }
   }
 ]

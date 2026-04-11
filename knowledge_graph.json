@@ -1,6 +1,14 @@
 {
   "entities": {
-    "threat_actors": {},
+    "threat_actors": {
+      "North Korea": {
+        "articles": [
+          "https://cybersecuritynews.com/openai-macos-users/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      }
+    },
     "malware_families": {
       "PlugX": {
         "articles": [
@@ -15,6 +23,20 @@
         ],
         "first_seen": "2026-04-11",
         "last_seen": "2026-04-11"
+      },
+      "plain-crypto-js": {
+        "articles": [
+          "https://cybersecuritynews.com/openai-macos-users/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "Atomic Stealer": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/news/2026/04/clickfix-finds-new-way-to-infect-macs"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "cves": {
@@ -74,6 +96,41 @@
         ],
         "first_seen": "2026-04-11",
         "last_seen": "2026-04-11"
+      },
+      "CVE-2025-14815": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2025-14816": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2026-5495": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2026-5494": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-256/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2026-5496": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-254/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "tools": {},
@@ -82,10 +139,12 @@
         "articles": [
           "https://securelist.com/clipbanker-malware-distributed-via-trojanized-proxifier/119341/",
           "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer",
-          "https://isc.sans.edu/diary/rss/32884"
+          "https://isc.sans.edu/diary/rss/32884",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/",
+          "https://blog.trailofbits.com/2026/04/07/what-we-learned-about-tee-security-from-auditing-whatsapps-private-inference/"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1060": {
         "articles": [
@@ -157,10 +216,11 @@
         "articles": [
           "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
           "https://thehackernews.com/2026/04/marimo-rce-flaw-cve-2026-39987.html",
-          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses",
+          "https://cybersecuritynews.com/hacker-uses-claude-and-chatgpt-to-breach/"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1190": {
         "articles": [
@@ -176,10 +236,13 @@
           "https://securityaffairs.com/190586/hacking/engagelab-sdk-flaw-opens-door-to-private-data-on-50m-android-devices.html",
           "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-01",
           "https://arxiv.org/abs/2306.05499",
-          "https://medium.com/@nirdiamant21/15-llm-jailbreaks-that-shook-ai-safety-981d2796d5c6"
+          "https://medium.com/@nirdiamant21/15-llm-jailbreaks-that-shook-ai-safety-981d2796d5c6",
+          "https://cybersecuritynews.com/openai-macos-users/",
+          "https://www.malwarebytes.com/blog/news/2026/04/clickfix-finds-new-way-to-infect-macs",
+          "https://www.cyberark.com/resources/threat-research-blog/jailbreaking-every-llm-with-one-simple-click"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1223": {
         "articles": [
@@ -204,10 +267,13 @@
       },
       "T1203": {
         "articles": [
-          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-256/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-254/"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1189": {
         "articles": [
@@ -225,17 +291,20 @@
       },
       "T1211": {
         "articles": [
-          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/",
+          "https://cybersecuritynews.com/ransomware-gangs-expand-use-of-edr-killers/"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1068": {
         "articles": [
-          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses",
+          "https://cybersecuritynews.com/hacker-uses-claude-and-chatgpt-to-breach/",
+          "https://www.cyderes.com/howler-cell/windows-zero-day-bluehammer"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1021.001": {
         "articles": [
@@ -272,11 +341,146 @@
         ],
         "first_seen": "2026-04-11",
         "last_seen": "2026-04-11"
+      },
+      "T1562.001": {
+        "articles": [
+          "https://cybersecuritynews.com/ransomware-gangs-expand-use-of-edr-killers/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1055.009": {
+        "articles": [
+          "https://cybersecuritynews.com/ransomware-gangs-expand-use-of-edr-killers/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1055.012": {
+        "articles": [
+          "https://cybersecuritynews.com/ransomware-gangs-expand-use-of-edr-killers/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1550": {
+        "articles": [
+          "https://cybersecuritynews.com/hacker-uses-claude-and-chatgpt-to-breach/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1003": {
+        "articles": [
+          "https://cybersecuritynews.com/hacker-uses-claude-and-chatgpt-to-breach/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1021.002": {
+        "articles": [
+          "https://cybersecuritynews.com/hacker-uses-claude-and-chatgpt-to-breach/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1552.001": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01",
+          "https://blog.trailofbits.com/2026/04/07/what-we-learned-about-tee-security-from-auditing-whatsapps-private-inference/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1078.001": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1485": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1499.001": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1087.001": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-097-01"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1212": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1546.003": {
+        "articles": [
+          "https://blog.trailofbits.com/2026/04/07/what-we-learned-about-tee-security-from-auditing-whatsapps-private-inference/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1620": {
+        "articles": [
+          "https://blog.trailofbits.com/2026/04/07/what-we-learned-about-tee-security-from-auditing-whatsapps-private-inference/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1006": {
+        "articles": [
+          "https://blog.trailofbits.com/2026/04/07/what-we-learned-about-tee-security-from-auditing-whatsapps-private-inference/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1003.002": {
+        "articles": [
+          "https://www.cyderes.com/howler-cell/windows-zero-day-bluehammer"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1083": {
+        "articles": [
+          "https://www.cyderes.com/howler-cell/windows-zero-day-bluehammer"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "industries": {},
     "countries": {}
   },
-  "relationships": [],
-  "updated": "2026-04-11 23:08"
+  "relationships": [
+    {
+      "from": "North Korea",
+      "rel": "uses_malware",
+      "to": "plain-crypto-js",
+      "source": "https://cybersecuritynews.com/openai-macos-users/",
+      "date": "2026-04-12"
+    },
+    {
+      "from": "North Korea",
+      "rel": "uses_technique",
+      "to": "T1566.001",
+      "source": "https://cybersecuritynews.com/openai-macos-users/",
+      "date": "2026-04-12"
+    }
+  ],
+  "updated": "2026-04-12 04:27"
 }
