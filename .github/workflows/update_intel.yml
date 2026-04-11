@@ -32,7 +32,7 @@ jobs:
           CEREBRAS_API_KEY:    ${{ secrets.CEREBRAS_API_KEY }}
           OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
           VIRUSTOTAL_API_KEY:  ${{ secrets.VIRUSTOTAL_API_KEY }}
-          OTX_API_KEY:         ${{ secrets.OTX_API_KEY }}
+#          OTX_API_KEY:         ${{ secrets.OTX_API_KEY }}
           GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
         run: python main.py
       - name: Commit and push
