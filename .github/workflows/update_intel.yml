@@ -1,43 +1,46 @@
-name: CIPHER Daily Intel Update
+name: CIPHER Multi-Agent Intel Pipeline
 
 on:
   schedule:
-    # 毎日 JST 06:00 (UTC 21:00) に実行
-    - cron: '0 21 * * *'
-  workflow_dispatch:   # 手動実行も可能
+    - cron: '0 */6 * * *'   # 6時間ごと (JST 09,15,21,03時)
+  workflow_dispatch:
 
 permissions:
-  contents: write      # コミット・プッシュに必要
+  contents: write
 
 jobs:
   update-intel:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
-        run: pip install groq tavily-python google-generativeai
-
-      - name: Run intel agent
+        run: |
+          pip install --upgrade pip
+          pip install groq tavily-python google-generativeai \
+                      cerebras-cloud-sdk openai requests
+      - name: Run multi-agent intel pipeline
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GROQ_API_KEY:        ${{ secrets.GROQ_API_KEY }}
+          TAVILY_API_KEY:      ${{ secrets.TAVILY_API_KEY }}
+          GEMINI_API_KEY:      ${{ secrets.GEMINI_API_KEY }}
+          CEREBRAS_API_KEY:    ${{ secrets.CEREBRAS_API_KEY }}
+          OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
+          VIRUSTOTAL_API_KEY:  ${{ secrets.VIRUSTOTAL_API_KEY }}
+          OTX_API_KEY:         ${{ secrets.OTX_API_KEY }}
+          GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
         run: python main.py
-
-      - name: Commit and push updated files
+      - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add all_articles.json articles.js index.html log.html log.js run_log.json
-          git diff --staged --quiet || git commit -m "chore: update intel feed $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git add all_articles.json articles.js index.html log.html log.js \
+                  run_log.json knowledge_graph.json atomic_tests/ || true
+          git diff --staged --quiet || \
+            git commit -m "chore: intel update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
