@@ -595,7 +595,7 @@ def call_gemini(prompt: str) -> dict | None:
         err = str(e)
         if "429" in err or "quota" in err.lower():
             print(f"    ✗ [Gemini] rate limit — waiting 40s")
-            time.sleep(40)
+            time.sleep(15)
             try:
                 resp = gemini_model.generate_content(
                     prompt,
