@@ -1219,41 +1219,53 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
         print(f"    ✗ report too short ({len(final_report)} < {MIN_REPORT_LEN})")
         return None
 
-    # ─── Agent 5: Critic loop ───────────────────────────────────────────
+    # ─── Agent 5: Critic loop ─────────────────────────────────────────
     critic_scores = []
     for loop in range(MAX_CRITIC_LOOPS + 1):
         print(f"    [Critic] reviewing (loop {loop+1})...")
-    critic_out = call_llm_chain(
-        prompt_critic(final_report, triage),
-        prefer=["gemini", "openrouter", "cerebras"],
-        role="reasoning",
-    )
-    if not critic_out:
-        print(f"    ⚠ Critic unavailable — accepting as-is")
-        break
-    overall = critic_out.get("overall", 0)
-    critic_scores.append({
-        "loop": loop + 1, "overall": overall,
-        "specificity": critic_out.get("specificity", 0),
-        "reproducibility": critic_out.get("reproducibility", 0),
-        "accuracy": critic_out.get("accuracy", 0),
-        "detection_quality": critic_out.get("detection_quality", 0),
-        "completeness": critic_out.get("completeness", 0),
-    })
-    print(f"    [Critic] overall={overall}/10 "
-          f"(spec={critic_out.get('specificity',0)} "
-          f"repro={critic_out.get('reproducibility',0)} "
-          f"acc={critic_out.get('accuracy',0)} "
-          f"det={critic_out.get('detection_quality',0)} "
-          f"cmp={critic_out.get('completeness',0)})")
+        critic_out = call_llm_chain(
+            prompt_critic(final_report, triage),
+            prefer=["gemini", "cerebras", "groq"],
+        )
+        if not critic_out:
+            print(f"    ⚠ Critic unavailable — accepting as-is")
+            break
+        overall = critic_out.get("overall", 0)
+        critic_scores.append({
+            "loop": loop + 1,
+            "overall": overall,
+            "specificity": critic_out.get("specificity", 0),
+            "reproducibility": critic_out.get("reproducibility", 0),
+            "accuracy": critic_out.get("accuracy", 0),
+            "detection_quality": critic_out.get("detection_quality", 0),
+            "completeness": critic_out.get("completeness", 0),
+        })
+        print(f"    [Critic] overall={overall}/10 "
+              f"(spec={critic_out.get('specificity',0)} "
+              f"repro={critic_out.get('reproducibility',0)} "
+              f"acc={critic_out.get('accuracy',0)} "
+              f"det={critic_out.get('detection_quality',0)} "
+              f"cmp={critic_out.get('completeness',0)})")
 
-    if overall >= CRITIC_THRESHOLD or critic_out.get("verdict") == "ACCEPT":
-        print(f"    ✓ Critic ACCEPT")
-        break
-    if loop >= MAX_CRITIC_LOOPS:
-        print(f"    ⚠ max critic loops reached — accepting")
-        break
+        if overall >= CRITIC_THRESHOLD or critic_out.get("verdict") == "ACCEPT":
+            print(f"    ✓ Critic ACCEPT")
+            break
+        if loop >= MAX_CRITIC_LOOPS:
+            print(f"    ⚠ max critic loops reached — accepting")
+            break
 
+        # ─── Revise ──────────────────────────────────────────────
+        issues = critic_out.get("issues", [])
+        print(f"    [Revise] fixing {len(issues)} issues...")
+        revise_out = call_llm_chain(
+            prompt_revise(final_report, issues, research_context),
+            prefer=["cerebras", "openrouter", "groq"],
+        )
+        if revise_out and revise_out.get("final_report_md"):
+            final_report = revise_out["final_report_md"]
+        else:
+            print(f"    ⚠ Revise failed — keeping previous")
+            break
     # ─── Revise ────────────────────────────────────────────────
     issues = critic_out.get("issues", [])
     print(f"    [Revise] fixing {len(issues)} issues...")
