@@ -1266,18 +1266,6 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
         else:
             print(f"    ⚠ Revise failed — keeping previous")
             break
-    # ─── Revise ────────────────────────────────────────────────
-    issues = critic_out.get("issues", [])
-    print(f"    [Revise] fixing {len(issues)} issues...")
-    revise_out = call_llm_chain(
-        prompt_revise(final_report, issues, research_context),
-        prefer=["cerebras", "openrouter", "groq"],
-    )
-    if revise_out and revise_out.get("final_report_md"):
-        final_report = revise_out["final_report_md"]
-    else:
-        print(f"    ⚠ Revise failed — keeping previous")
-        break
 
     return {
         "title":          editor_out.get("title_jp") or triage.get("title_jp") or "Untitled",
@@ -1289,7 +1277,7 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
         "threat_actor":   triage.get("threat_actor", ""),
         "malware_family": triage.get("malware_family", ""),
         "content":        final_report,
-        "atomic_tests":   atomic_tests,
+        "atomic_tests":   exploit_out.get("atomic_tests", []) if exploit_out else [],
         "critic_scores":  critic_scores,
     }
 
