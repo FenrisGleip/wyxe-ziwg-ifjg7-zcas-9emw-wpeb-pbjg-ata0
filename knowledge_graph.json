@@ -1,13 +1,282 @@
 {
   "entities": {
     "threat_actors": {},
-    "malware_families": {},
-    "cves": {},
+    "malware_families": {
+      "PlugX": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "JS/PowerShell Downloader": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      }
+    },
+    "cves": {
+      "CVE-2026-39987": {
+        "articles": [
+          "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
+          "https://thehackernews.com/2026/04/marimo-rce-flaw-cve-2026-39987.html"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2025-13926": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-01"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2026-4436": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-02"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2026-1340": {
+        "articles": [
+          "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2025-5419": {
+        "articles": [
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2024-38063": {
+        "articles": [
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2021-42278": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "CVE-2021-42287": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      }
+    },
     "tools": {},
-    "techniques": {},
+    "techniques": {
+      "T1055": {
+        "articles": [
+          "https://securelist.com/clipbanker-malware-distributed-via-trojanized-proxifier/119341/",
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer",
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1060": {
+        "articles": [
+          "https://securelist.com/clipbanker-malware-distributed-via-trojanized-proxifier/119341/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1082": {
+        "articles": [
+          "https://securelist.com/clipbanker-malware-distributed-via-trojanized-proxifier/119341/",
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1574.002": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1071.001": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer",
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1105": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer",
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1547.001": {
+        "articles": [
+          "https://www.malwarebytes.com/blog/scams/2026/04/fake-claude-site-installs-malware-that-gives-attackers-access-to-your-computer"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1543.001": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1566": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1497.001": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32884"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1210": {
+        "articles": [
+          "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
+          "https://thehackernews.com/2026/04/marimo-rce-flaw-cve-2026-39987.html",
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1190": {
+        "articles": [
+          "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
+          "https://thehackernews.com/2026/04/marimo-rce-flaw-cve-2026-39987.html",
+          "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1566.001": {
+        "articles": [
+          "https://securityaffairs.com/190586/hacking/engagelab-sdk-flaw-opens-door-to-private-data-on-50m-android-devices.html",
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-01",
+          "https://arxiv.org/abs/2306.05499",
+          "https://medium.com/@nirdiamant21/15-llm-jailbreaks-that-shook-ai-safety-981d2796d5c6"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1223": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-02"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1632": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-02"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1020": {
+        "articles": [
+          "https://www.cisa.gov/news-events/ics-advisories/icsa-26-099-02"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1203": {
+        "articles": [
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1189": {
+        "articles": [
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1059.007": {
+        "articles": [
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1211": {
+        "articles": [
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1068": {
+        "articles": [
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1021.001": {
+        "articles": [
+          "https://www.darkreading.com/vulnerabilities-threats/poc-exploit-for-zero-click-vulnerability-made-available-to-the-masses"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1133": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1558.003": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/",
+          "https://istrosec.com/blog/the-attackers-active-directory-playbook--1-how-to/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1098.002": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      },
+      "T1556.003": {
+        "articles": [
+          "https://www.nopsec.com/blog/exploiting-kerberos-for-lateral-movement-and-privilege-escalation/"
+        ],
+        "first_seen": "2026-04-11",
+        "last_seen": "2026-04-11"
+      }
+    },
     "industries": {},
     "countries": {}
   },
   "relationships": [],
-  "updated": "2026-04-11 17:23"
+  "updated": "2026-04-11 23:08"
 }
