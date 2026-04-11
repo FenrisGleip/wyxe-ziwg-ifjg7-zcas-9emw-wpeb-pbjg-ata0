@@ -1178,7 +1178,8 @@ def multi_agent_pipeline(content: str, category: str, triage: dict,
     # ─── Agent 2: Exploit writer (DeepSeek via OpenRouter primary) ──────
     print(f"    [Exploit] generating reproduction + lab + atomic...")
     editor_out = call_llm_chain(
-        prompt_editor(...),
+        prompt_editor(triage, mechanism_md, reproduction_md, lab_setup_md,
+                      detection_md, ioc_md, research_context),
         prefer=["cerebras", "openrouter", "groq"],
         role="reasoning",
     )
