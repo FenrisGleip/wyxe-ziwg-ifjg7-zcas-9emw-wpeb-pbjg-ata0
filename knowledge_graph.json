@@ -7,6 +7,27 @@
         ],
         "first_seen": "2026-04-12",
         "last_seen": "2026-04-12"
+      },
+      "UNC6780": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32880"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "Storm-2755": {
+        "articles": [
+          "https://www.helpnetsecurity.com/2026/04/10/poisoned-office-365-search-results-lead-to-stolen-paychecks/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "GlassWorm": {
+        "articles": [
+          "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "malware_families": {
@@ -33,7 +54,15 @@
       },
       "Atomic Stealer": {
         "articles": [
-          "https://www.malwarebytes.com/blog/news/2026/04/clickfix-finds-new-way-to-infect-macs"
+          "https://www.malwarebytes.com/blog/news/2026/04/clickfix-finds-new-way-to-infect-macs",
+          "https://www.helpnetsecurity.com/2026/04/10/clickfix-mac-malware-script-editor/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "GlassWorm Dropper": {
+        "articles": [
+          "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html"
         ],
         "first_seen": "2026-04-12",
         "last_seen": "2026-04-12"
@@ -131,6 +160,34 @@
         ],
         "first_seen": "2026-04-12",
         "last_seen": "2026-04-12"
+      },
+      "CVE-2026-33634": {
+        "articles": [
+          "https://isc.sans.edu/diary/rss/32880"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-...": {
+        "articles": [
+          "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2026-5493": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "CVE-2026-29059": {
+        "articles": [
+          "https://github.com/zulloper/cve-poc/blob/master/README.md"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "tools": {},
@@ -156,10 +213,11 @@
       "T1082": {
         "articles": [
           "https://securelist.com/clipbanker-malware-distributed-via-trojanized-proxifier/119341/",
-          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/"
+          "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1574.002": {
         "articles": [
@@ -226,10 +284,11 @@
         "articles": [
           "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
           "https://thehackernews.com/2026/04/marimo-rce-flaw-cve-2026-39987.html",
-          "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog"
+          "https://www.cisa.gov/news-events/alerts/2026/04/08/cisa-adds-one-known-exploited-vulnerability-catalog",
+          "https://github.com/zulloper/cve-poc/blob/master/README.md"
         ],
         "first_seen": "2026-04-11",
-        "last_seen": "2026-04-11"
+        "last_seen": "2026-04-12"
       },
       "T1566.001": {
         "articles": [
@@ -239,7 +298,12 @@
           "https://medium.com/@nirdiamant21/15-llm-jailbreaks-that-shook-ai-safety-981d2796d5c6",
           "https://cybersecuritynews.com/openai-macos-users/",
           "https://www.malwarebytes.com/blog/news/2026/04/clickfix-finds-new-way-to-infect-macs",
-          "https://www.cyberark.com/resources/threat-research-blog/jailbreaking-every-llm-with-one-simple-click"
+          "https://www.cyberark.com/resources/threat-research-blog/jailbreaking-every-llm-with-one-simple-click",
+          "https://isc.sans.edu/diary/rss/32880",
+          "https://www.helpnetsecurity.com/2026/04/10/clickfix-mac-malware-script-editor/",
+          "https://www.helpnetsecurity.com/2026/04/10/poisoned-office-365-search-results-lead-to-stolen-paychecks/",
+          "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
         ],
         "first_seen": "2026-04-11",
         "last_seen": "2026-04-12"
@@ -270,7 +334,8 @@
           "https://gbhackers.com/poc-exploit-published-for-chrome-0-day/",
           "http://www.zerodayinitiative.com/advisories/ZDI-26-257/",
           "http://www.zerodayinitiative.com/advisories/ZDI-26-256/",
-          "http://www.zerodayinitiative.com/advisories/ZDI-26-254/"
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-254/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
         ],
         "first_seen": "2026-04-11",
         "last_seen": "2026-04-12"
@@ -422,7 +487,8 @@
       },
       "T1212": {
         "articles": [
-          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/"
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-257/",
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
         ],
         "first_seen": "2026-04-12",
         "last_seen": "2026-04-12"
@@ -461,6 +527,20 @@
         ],
         "first_seen": "2026-04-12",
         "last_seen": "2026-04-12"
+      },
+      "T1204": {
+        "articles": [
+          "https://www.helpnetsecurity.com/2026/04/10/poisoned-office-365-search-results-lead-to-stolen-paychecks/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
+      },
+      "T1059.003": {
+        "articles": [
+          "http://www.zerodayinitiative.com/advisories/ZDI-26-255/"
+        ],
+        "first_seen": "2026-04-12",
+        "last_seen": "2026-04-12"
       }
     },
     "industries": {},
@@ -480,7 +560,42 @@
       "to": "T1566.001",
       "source": "https://cybersecuritynews.com/openai-macos-users/",
       "date": "2026-04-12"
+    },
+    {
+      "from": "UNC6780",
+      "rel": "uses_technique",
+      "to": "T1566.001",
+      "source": "https://isc.sans.edu/diary/rss/32880",
+      "date": "2026-04-12"
+    },
+    {
+      "from": "Storm-2755",
+      "rel": "uses_technique",
+      "to": "T1566.001",
+      "source": "https://www.helpnetsecurity.com/2026/04/10/poisoned-office-365-search-results-lead-to-stolen-paychecks/",
+      "date": "2026-04-12"
+    },
+    {
+      "from": "Storm-2755",
+      "rel": "uses_technique",
+      "to": "T1204",
+      "source": "https://www.helpnetsecurity.com/2026/04/10/poisoned-office-365-search-results-lead-to-stolen-paychecks/",
+      "date": "2026-04-12"
+    },
+    {
+      "from": "GlassWorm",
+      "rel": "uses_malware",
+      "to": "GlassWorm Dropper",
+      "source": "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html",
+      "date": "2026-04-12"
+    },
+    {
+      "from": "GlassWorm",
+      "rel": "uses_technique",
+      "to": "T1566.001",
+      "source": "https://thehackernews.com/2026/04/glassworm-campaign-uses-zig-dropper-to.html",
+      "date": "2026-04-12"
     }
   ],
-  "updated": "2026-04-12 04:27"
+  "updated": "2026-04-12 11:45"
 }
