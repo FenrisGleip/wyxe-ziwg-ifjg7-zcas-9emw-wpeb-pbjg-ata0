@@ -150,14 +150,7 @@ a:hover{text-decoration:underline}
 <div class="kg-panel" id="kg-panel"><div class="kg-grid" id="kg-grid"></div></div>
 
 <div class="ctrl">
-  <input type="text" id="search" placeholder="🔍 検索..." autocomplete="off">
-  <select id="date-filter" class="fbtn" style="padding:6px 10px">
-    <option value="ALL">📅 全期間</option>
-    <option value="1">今日</option>
-    <option value="3">3日以内</option>
-    <option value="7">7日以内</option>
-    <option value="30">30日以内</option>
-  </select>
+  <input type="text" id="search" placeholder="🔍 タイトル・本文・CVE・APT・国・業界で検索..." autocomplete="off">
   <div class="filters">
     <button class="fbtn on" data-cat="ALL">ALL</button>
     <button class="fbtn" data-cat="MALWARE">MAL</button>
@@ -232,19 +225,12 @@ document.querySelectorAll('.fbtn').forEach(b=>{
   };
 });
 document.getElementById('search').oninput=render;
-document.getElementById('date-filter').onchange = render;
 
 function render(){
   const q=document.getElementById('search').value.toLowerCase();
   const feed=document.getElementById('feed');
-  const dateFilter = document.getElementById('date-filter').value;
   feed.innerHTML='';
   const filtered=db.filter(a=>{
-    if(dateFilter !== 'ALL'){
-      const days = parseInt(dateFilter);
-      const cutoff = new Date(Date.now() - days*86400000).toISOString().slice(0,10);
-      if(a.date < cutoff) return false;
-    }
     if(activeCat==='RESEARCHED')return a.researched;
     if(activeCat==='HIGH_SCORE'){const s=bestScore(a);return s!=null&&s>=7}
     if(activeCat!=='ALL'&&a.category!==activeCat)return false;
@@ -361,7 +347,6 @@ function openDet(a){
   });
   document.getElementById('det-src-link').href=a.url;
   document.getElementById('det').classList.add('open');
-  document.querySelector('.det-body').scrollTop = 0;
   history.pushState({view:'detail'},'');
 }
 function closeDet(){document.getElementById('det').classList.remove('open')}
